@@ -1,6 +1,8 @@
 import { supabase } from '../lib/supabase';
 
 const LOCAL_PREFERENCES_KEY = 'spider_safety_alert_preferences';
+const SAFETY_PUSH_SW_URL = `${import.meta.env.BASE_URL}safety-push-sw.js`;
+const APP_BASE_URL = new URL(import.meta.env.BASE_URL, window.location.origin).toString();
 
 export interface SafetyPushEnrollment {
   enrolled: boolean;
@@ -111,7 +113,9 @@ export const enableNearbySafetyAlerts = async (): Promise<void> => {
     : await Notification.requestPermission();
   if (permission !== 'granted') throw new Error('Allow browser notifications to receive nearby SOS alerts.');
 
-  const registration = await navigator.serviceWorker.register('/safety-push-sw.js');
+  const registration = await navigator.serviceWorker.register(SAFETY_PUSH_SW_URL, {
+    scope: import.meta.env.BASE_URL
+  });
   const subscription = await registration.pushManager.getSubscription() || await registration.pushManager.subscribe({
     userVisibleOnly: true,
     applicationServerKey: decodeVapidKey(vapidPublicKey)
@@ -125,7 +129,7 @@ export const enableNearbySafetyAlerts = async (): Promise<void> => {
 };
 
 export const disableNearbySafetyAlerts = async (): Promise<void> => {
-  const registration = await navigator.serviceWorker.getRegistration('/safety-push-sw.js');
+  const registration = await navigator.serviceWorker.getRegistration(APP_BASE_URL);
   const subscription = await registration?.pushManager.getSubscription();
   if (!subscription) return;
 
@@ -137,7 +141,7 @@ export const disableNearbySafetyAlerts = async (): Promise<void> => {
 };
 
 export const refreshNearbySafetyLocation = async (): Promise<void> => {
-  const registration = await navigator.serviceWorker.getRegistration('/safety-push-sw.js');
+  const registration = await navigator.serviceWorker.getRegistration(APP_BASE_URL);
   const subscription = await registration?.pushManager.getSubscription();
   if (!subscription) throw new Error('Enable nearby safety alerts on this browser first.');
 
@@ -164,6 +168,6 @@ export const triggerSafetySOS = async (locationAddress: string): Promise<{ recip
 
 export const isSafetyPushEnrolled = async (): Promise<boolean> => {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
-  const registration = await navigator.serviceWorker.getRegistration('/safety-push-sw.js');
+  const registration = await navigator.serviceWorker.getRegistration(APP_BASE_URL);
   return Boolean(await registration?.pushManager.getSubscription());
 };

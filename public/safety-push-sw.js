@@ -7,14 +7,15 @@ self.addEventListener('push', (event) => {
   }
 
   const title = payload.title || 'Spider Safety SOS';
+  const appUrl = payload.url && payload.url !== '/' ? payload.url : self.registration.scope;
   const options = {
     body: payload.body || 'A nearby person needs urgent help. Open Spider to respond.',
-    icon: '/vite.svg',
-    badge: '/vite.svg',
+    icon: new URL('favicon.svg', self.registration.scope).href,
+    badge: new URL('favicon.svg', self.registration.scope).href,
     tag: payload.tag || 'spider-safety-sos',
     renotify: true,
     actions: payload.mapUrl ? [{ action: 'open-map', title: 'Open map' }] : [],
-    data: { url: payload.url || '/', mapUrl: payload.mapUrl || null }
+    data: { url: appUrl, mapUrl: payload.mapUrl || null }
   };
   event.waitUntil(self.registration.showNotification(title, options));
 });
@@ -25,7 +26,7 @@ self.addEventListener('notificationclick', (event) => {
     event.waitUntil(self.clients.openWindow(event.notification.data.mapUrl));
     return;
   }
-  const targetUrl = new URL(event.notification.data?.url || '/', self.location.origin).href;
+  const targetUrl = new URL(event.notification.data?.url || self.registration.scope, self.registration.scope).href;
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
       const existingClient = clients.find((client) => client.url.startsWith(self.location.origin));
