@@ -118,11 +118,11 @@ export const AccountDetailsModal: React.FC<AccountDetailsModalProps> = ({ profil
             <div className="flex items-start gap-3 rounded-xl bg-spider-bg px-3.5 py-3">
               <Phone className="mt-0.5 h-4 w-4 shrink-0 text-spider-muted" />
               <div className="min-w-0 flex-1">
-                <dt className="text-[11px] font-semibold text-spider-muted">Mobile number</dt>
+                <dt className="text-[11px] font-semibold text-spider-muted">Mobile number (optional)</dt>
                 {isEditing ? (
                   <input type="tel" aria-label="Mobile number" autoComplete="tel" className={inputClassName} value={form.mobile_number} onChange={(event) => setForm({ ...form, mobile_number: event.target.value })} />
-                ) : <dd className="mt-0.5 text-sm font-semibold text-spider-text">{profile.mobile_number}</dd>}
-                <dd className="mt-0.5 text-[11px] text-spider-muted">Used for sign-in only; never shared with other users.</dd>
+                ) : <dd className="mt-0.5 text-sm font-semibold text-spider-text">{profile.mobile_number || 'Not provided'}</dd>}
+                <dd className="mt-0.5 text-[11px] text-spider-muted">Optional private profile information; not used for sign-in or shared with other users.</dd>
               </div>
             </div>
             <div className="flex items-start gap-3 rounded-xl bg-spider-bg px-3.5 py-3">

@@ -1,4 +1,5 @@
-import { supabase } from '../lib/supabase';
+import { addDoc, collection } from 'firebase/firestore';
+import { firestore } from '../lib/firebase';
 
 export interface FeatureSuggestion {
   id: string;
@@ -12,11 +13,11 @@ export const submitFeatureSuggestion = async (suggestion: string): Promise<void>
     throw new Error('Suggestion must be between 10 and 2,000 characters.');
   }
 
-  if (supabase) {
-    const { error } = await supabase.from('feature_suggestions').insert({
-      suggestion: trimmedSuggestion
+  if (firestore) {
+    await addDoc(collection(firestore, 'featureSuggestions'), {
+      suggestion: trimmedSuggestion,
+      created_at: new Date().toISOString()
     });
-    if (error) throw new Error('Could not submit your suggestion. Please try again.');
     return;
   }
 

@@ -29,4 +29,4 @@ The Vite build automatically uses the repository subpath for project Pages sites
 
 ## Backend configuration
 
-The app can render in local browser mode without Supabase. SMS authentication, push SOS alerts, and in-app calls require the corresponding Supabase project and provider configuration. See the setup guides in `supabase/`.
+The app can render in local browser mode without Firebase. Email/password authentication and marketplace data use Firebase Authentication and Cloud Firestore. Safety alerts, emergency payments, and in-app calling require Firebase Cloud Functions, Realtime Database, and their related provider setup. See [`firebase/README.md`](./firebase/README.md).

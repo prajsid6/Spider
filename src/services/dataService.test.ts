@@ -1,4 +1,9 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('../lib/firebase', () => ({
+  firestore: null
+}));
+
 import { DataService } from './dataService';
 import type { Profile } from '../types';
 
@@ -43,9 +48,21 @@ describe('Spider DataService & Marketplace Logic', () => {
     expect(await DataService.getOffersForRequest('req-1')).toEqual([]);
   });
 
-  it('finds local demo accounts by normalized phone digits', () => {
-    expect(DataService.getLocalProfileByPhone('+91 98765 43210')?.id).toBe(testProfiles[0].id);
-    expect(DataService.getLocalProfileByPhone('+919999999999')).toBeNull();
+  it('finds local demo accounts by email', async () => {
+    const profile = { ...testProfiles[0], email: '  Test@Example.com ' };
+    expect(DataService.getLocalProfileByEmail('test@example.com')).toBeNull();
+    await DataService.saveProfile(profile);
+    expect(DataService.getLocalProfileByEmail('TEST@example.com')?.id).toBe(testProfiles[0].id);
+    expect(DataService.getLocalProfileByEmail('unknown@example.com')).toBeNull();
+  });
+
+  it('rejects incorrect local email passwords', async () => {
+    await DataService.saveLocalEmailPassword('test@example.com', 'correct-password');
+    expect(await DataService.verifyLocalEmailPassword('TEST@example.com', 'wrong-password')).toBe(false);
+    expect(await DataService.verifyLocalEmailPassword('test@example.com', 'correct-password')).toBe(true);
+  });
+
+  it('requires an existing local profile before activating a user', () => {
     expect(() => DataService.setLocalActiveUser('missing-user')).toThrow('Local demo account was not found.');
   });
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { AlertCircle, CalendarDays, CheckCircle2, LockKeyhole, Phone, UserRound, X } from 'lucide-react';
+import { AlertCircle, AtSign, CalendarDays, CheckCircle2, LockKeyhole, UserRound, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 
@@ -19,15 +19,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onClose,
   defaultMode = 'signin'
 }) => {
-  const { requestPhoneOtp, verifyPhoneOtp, continueWithoutOtp, demoAuthEnabled } = useAuth();
+  const { signInWithEmail, signUpWithEmail, demoAuthEnabled } = useAuth();
   const { showToast } = useToast();
   const [mode, setMode] = useState<'signup' | 'signin'>(defaultMode);
   const [name, setName] = useState('');
-  const [mobileNumber, setMobileNumber] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
   const [termsAccepted, setTermsAccepted] = useState(false);
-  const [otp, setOtp] = useState('');
-  const [pendingPhone, setPendingPhone] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -36,8 +35,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     if (!isOpen) return;
     setMode(defaultMode);
     setTermsAccepted(false);
-    setPendingPhone('');
-    setOtp('');
+    setPassword('');
     setError('');
   }, [defaultMode, isOpen]);
 
@@ -46,56 +44,30 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const changeMode = (nextMode: 'signup' | 'signin') => {
     setMode(nextMode);
     setTermsAccepted(false);
-    setPendingPhone('');
-    setOtp('');
+    setPassword('');
     setError('');
   };
 
-  const sendOtp = async () => {
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
     setError('');
     setLoading(true);
     try {
-      const profile = mode === 'signup'
-        ? { name, mobile_number: mobileNumber, date_of_birth: dateOfBirth }
-        : undefined;
-      if (demoAuthEnabled) {
-        await continueWithoutOtp(mobileNumber, profile);
-        showToast(mode === 'signup' ? 'Local demo account created.' : 'Signed in to your local demo account.', 'success');
-        setPendingPhone('');
-        onClose();
-        return;
+      if (mode === 'signup') {
+        const signedIn = await signUpWithEmail(email, password, { name, date_of_birth: dateOfBirth }, rememberMe);
+        showToast(
+          signedIn
+            ? demoAuthEnabled ? 'Local demo account created.' : 'Account created successfully.'
+            : 'Account created. Check your email to confirm it, then sign in.',
+          'success'
+        );
+      } else {
+        await signInWithEmail(email, password, rememberMe);
+        showToast(demoAuthEnabled ? 'Signed in to your local demo account.' : 'Signed in successfully.', 'success');
       }
-      const normalizedPhone = await requestPhoneOtp(mobileNumber, rememberMe, profile);
-      setMobileNumber(normalizedPhone);
-      setPendingPhone(normalizedPhone);
-      showToast(`A verification code was sent to ${normalizedPhone}.`, 'success');
-    } catch (sendError) {
-      setError(sendError instanceof Error ? sendError.message : 'Could not send the verification code.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSendOtp = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    void sendOtp();
-  };
-
-  const handleVerifyOtp = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setError('');
-    setLoading(true);
-    try {
-      const profile = mode === 'signup'
-        ? { name, mobile_number: pendingPhone, date_of_birth: dateOfBirth }
-        : undefined;
-      await verifyPhoneOtp(pendingPhone, otp, rememberMe, profile);
-      showToast(mode === 'signup' ? 'Account created successfully.' : 'Signed in successfully.', 'success');
-      setOtp('');
-      setPendingPhone('');
       onClose();
-    } catch (verifyError) {
-      setError(verifyError instanceof Error ? verifyError.message : 'Could not verify the code.');
+    } catch (authError) {
+      setError(authError instanceof Error ? authError.message : 'Could not authenticate with email.');
     } finally {
       setLoading(false);
     }
@@ -126,11 +98,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             {mode === 'signup' ? 'Create your account' : 'Sign in to Spider'}
           </h2>
           <p className="mt-1 text-xs text-spider-muted">
-            {pendingPhone
-              ? `Enter the code sent to ${pendingPhone}.`
-              : demoAuthEnabled
-                ? 'Local development demo access; no SMS code is sent.'
-                : 'Use your mobile number and a one-time verification code.'}
+            {demoAuthEnabled
+              ? 'Local demo access with an email and password.'
+              : 'Sign in securely with your email and password.'}
           </p>
         </div>
 
@@ -162,8 +132,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </div>
         )}
 
-        {!pendingPhone ? (
-          <form onSubmit={handleSendOtp} className="mt-4 space-y-3.5">
+        <form onSubmit={handleSubmit} className="mt-4 space-y-3.5">
             {mode === 'signup' && (
               <>
                 <label className="block text-xs font-bold text-spider-text">
@@ -202,16 +171,32 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             )}
 
             <label className="block text-xs font-bold text-spider-text">
-              Mobile number
+              Email address
               <span className="relative mt-1.5 block">
-                <Phone className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-spider-muted" />
+                <AtSign className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-spider-muted" />
                 <input
-                  type="tel"
+                  type="email"
                   required
-                  autoComplete="tel"
-                  value={mobileNumber}
-                  onChange={(event) => setMobileNumber(event.target.value)}
-                  placeholder="+91 9876543210"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="you@example.com"
+                  className={`${inputClassName} pl-9`}
+                />
+              </span>
+            </label>
+            <label className="block text-xs font-bold text-spider-text">
+              Password
+              <span className="relative mt-1.5 block">
+                <LockKeyhole className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-spider-muted" />
+                <input
+                  type="password"
+                  required
+                  minLength={mode === 'signup' ? 8 : undefined}
+                  autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder={mode === 'signup' ? 'At least 8 characters' : 'Your password'}
                   className={`${inputClassName} pl-9`}
                 />
               </span>
@@ -241,70 +226,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </label>
                 <p className="text-[11px] leading-relaxed text-spider-muted">
                   {demoAuthEnabled
-                    ? 'You must be at least 13 years old. This demo account is saved only in this browser.'
-                    : 'You must be at least 13 years old. We’ll send an SMS code to verify your mobile number.'}
+                    ? 'You must be at least 13 years old. Demo account details are saved only in this browser.'
+                    : 'You must be at least 13 years old. You may need to confirm your email before signing in.'}
                 </p>
               </>
             )}
             <button type="submit" disabled={loading} className="w-full btn-primary py-2.5 text-sm font-bold disabled:opacity-50">
-              {loading
-                ? demoAuthEnabled ? 'Continuing...' : 'Sending code...'
-                : demoAuthEnabled
-                  ? mode === 'signup' ? 'Create demo account' : 'Continue without OTP'
-                  : 'Send OTP'}
+              {loading ? 'Please wait...' : mode === 'signup' ? 'Create account' : 'Sign in'}
             </button>
-          </form>
-        ) : (
-          <form onSubmit={handleVerifyOtp} className="mt-4 space-y-4">
-            <label className="block text-xs font-bold text-spider-text">
-              One-time password
-              <span className="relative mt-1.5 block">
-                <LockKeyhole className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-spider-muted" />
-                <input
-                  type="text"
-                  required
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  pattern="[0-9]{4,8}"
-                  maxLength={8}
-                  value={otp}
-                  onChange={(event) => setOtp(event.target.value.replace(/\D/g, ''))}
-                  placeholder="Enter verification code"
-                  className={`${inputClassName} pl-9 tracking-[0.3em]`}
-                />
-              </span>
-            </label>
-            <button type="submit" disabled={loading || otp.length < 4} className="w-full btn-primary py-2.5 text-sm font-bold disabled:opacity-50">
-              {loading ? 'Verifying...' : mode === 'signup' ? 'Verify & Create Account' : 'Verify & Sign In'}
-            </button>
-            <div className="flex items-center justify-between gap-3 text-xs">
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() => {
-                  setPendingPhone('');
-                  setOtp('');
-                  setError('');
-                }}
-                className="font-semibold text-spider-muted hover:text-spider-text disabled:opacity-50"
-              >
-                Change details
-              </button>
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() => void sendOtp()}
-                className="font-semibold text-spider-primary hover:underline disabled:opacity-50"
-              >
-                Resend code
-              </button>
-            </div>
-          </form>
-        )}
+        </form>
 
         <div className="mt-4 flex items-center justify-center gap-1.5 border-t border-spider-border/60 pt-4 text-[11px] text-spider-muted">
           <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-          Your mobile number stays private; connected users can call by username.
+          Your email is private; connected users can call by username.
         </div>
       </section>
     </div>

@@ -1,0 +1,161 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function canRateParticipant(requestId, raterId, rateeId) {
+      let requestPath = /databases/$(database)/documents/requests/$(requestId);
+      let offerByRateePath = /databases/$(database)/documents/offers/$(requestId + '_' + rateeId);
+      let offerByRaterPath = /databases/$(database)/documents/offers/$(requestId + '_' + raterId);
+      let requestData = get(requestPath).data;
+      return exists(requestPath)
+        && requestData.status == 'Completed'
+        && (
+          (
+            requestData.requester_id == raterId
+            && exists(offerByRateePath)
+            && get(offerByRateePath).data.helper_id == rateeId
+            && get(offerByRateePath).data.status == 'Accepted'
+          )
+          || (
+            requestData.requester_id == rateeId
+            && exists(offerByRaterPath)
+            && get(offerByRaterPath).data.helper_id == raterId
+            && get(offerByRaterPath).data.status == 'Accepted'
+          )
+        );
+    }
+
+    match /profiles/{userId} {
+      allow read, create, update, delete: if signedIn() && request.auth.uid == userId;
+    }
+
+    match /publicProfiles/{userId} {
+      allow read: if true;
+      allow create, update: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(['id', 'name', 'username', 'created_at', 'avatar_color'])
+        && request.resource.data.id == userId;
+      allow delete: if signedIn() && request.auth.uid == userId;
+    }
+
+    match /requests/{requestId} {
+      allow read: if true;
+      allow create: if signedIn()
+        && request.resource.data.requester_id == request.auth.uid
+        && request.resource.data.description is string
+        && request.resource.data.description.size() >= 5
+        && request.resource.data.description.size() <= 1000
+        && request.resource.data.is_emergency is bool
+        && request.resource.data.status == 'Open'
+        && request.resource.data.keys().hasOnly([
+          'id', 'requester_id', 'description', 'details', 'budget_inr',
+          'status', 'created_at', 'is_emergency', 'expires_at',
+          'offers_count', 'requester', 'accepted_offer'
+        ]);
+      allow update: if signedIn()
+        && resource.data.requester_id == request.auth.uid
+        && request.resource.data.requester_id == resource.data.requester_id
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'accepted_offer_id'])
+        && (
+          (
+            resource.data.status == 'Open'
+            && request.resource.data.status == 'Connected'
+            && request.resource.data.accepted_offer_id is string
+            && getAfter(/databases/$(database)/documents/offers/$(request.resource.data.accepted_offer_id)).data.status == 'Accepted'
+            && getAfter(/databases/$(database)/documents/offers/$(request.resource.data.accepted_offer_id)).data.request_id == requestId
+          )
+          || (
+            resource.data.status == 'Connected'
+            && request.resource.data.status == 'Completed'
+            && request.resource.data.accepted_offer_id == resource.data.accepted_offer_id
+          )
+        );
+      allow delete: if false;
+    }
+
+    match /offers/{offerId} {
+      allow read: if true;
+      allow create: if signedIn()
+        && request.resource.data.helper_id == request.auth.uid
+        && request.resource.data.message is string
+        && request.resource.data.message.size() >= 3
+        && request.resource.data.message.size() <= 2000
+        && request.resource.data.status == 'Pending'
+        && request.resource.data.keys().hasOnly([
+          'id', 'request_id', 'helper_id', 'message', 'proposed_price_inr',
+          'status', 'created_at', 'helper'
+        ])
+        && exists(/databases/$(database)/documents/requests/$(request.resource.data.request_id))
+        && get(/databases/$(database)/documents/requests/$(request.resource.data.request_id)).data.status == 'Open'
+        && get(/databases/$(database)/documents/requests/$(request.resource.data.request_id)).data.requester_id != request.auth.uid;
+      allow update: if signedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+        && (
+          (
+            resource.data.status == 'Pending'
+            && resource.data.helper_id == request.auth.uid
+            && request.resource.data.status == 'Declined'
+          )
+          || (
+            get(/databases/$(database)/documents/requests/$(resource.data.request_id)).data.requester_id == request.auth.uid
+            && resource.data.status == 'Pending'
+            && (
+              request.resource.data.status == 'Declined'
+              || (
+                request.resource.data.status == 'Accepted'
+                && getAfter(/databases/$(database)/documents/requests/$(resource.data.request_id)).data.status == 'Connected'
+                && getAfter(/databases/$(database)/documents/requests/$(resource.data.request_id)).data.accepted_offer_id == offerId
+              )
+            )
+          )
+        );
+      allow delete: if false;
+    }
+
+    match /ratings/{ratingId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.rater_id == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'id', 'request_id', 'rater_id', 'ratee_id', 'score', 'created_at'
+        ])
+        && request.resource.data.score is int
+        && request.resource.data.score >= 1
+        && request.resource.data.score <= 10
+        && request.resource.data.id == ratingId
+        && ratingId == request.resource.data.request_id + '_' + request.auth.uid
+        && canRateParticipant(request.resource.data.request_id, request.resource.data.rater_id, request.resource.data.ratee_id);
+      allow update, delete: if false;
+    }
+
+    match /featureSuggestions/{suggestionId} {
+      allow create: if request.resource.data.suggestion is string
+        && request.resource.data.suggestion.size() >= 10
+        && request.resource.data.suggestion.size() <= 2000;
+      allow read, update, delete: if false;
+    }
+
+    match /pushPreferences/{userId} {
+      allow read, write: if false;
+    }
+
+    match /pushSubscriptions/{subscriptionId} {
+      allow read, write: if false;
+    }
+
+    match /payments/{paymentId} {
+      allow read, write: if false;
+    }
+
+    match /emergencyLocations/{requestId} {
+      allow read, write: if false;
+    }
+
+    match /callAccess/{requestId} {
+      allow read, write: if false;
+    }
+  }
+}

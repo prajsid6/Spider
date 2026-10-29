@@ -1,23 +1,21 @@
 import React, { createContext, useEffect, useState } from 'react';
+import { createUserWithEmailAndPassword, onAuthStateChanged, sendEmailVerification, signInWithEmailAndPassword, signOut as firebaseSignOut, updateProfile as updateFirebaseProfile } from 'firebase/auth';
 import type { Profile } from '../types';
 import { DataService } from '../services/dataService';
-import { isSupabaseConfigured, setRememberMePreference, supabase } from '../lib/supabase';
-import { normalizePhoneNumber } from '../lib/phone';
+import { auth, firestore, isFirebaseConfigured, setRememberMePreference } from '../lib/firebase';
 
 export interface SignupProfile {
   name: string;
-  mobile_number: string;
   date_of_birth: string;
 }
 
 interface AuthContextType {
   currentUser: Profile | null;
-  isSupabase: boolean;
+  isFirebase: boolean;
   demoAuthEnabled: boolean;
   loading: boolean;
-  requestPhoneOtp: (phone: string, rememberMe: boolean, profile?: SignupProfile) => Promise<string>;
-  verifyPhoneOtp: (phone: string, token: string, rememberMe: boolean, profile?: SignupProfile) => Promise<void>;
-  continueWithoutOtp: (phone: string, profile?: SignupProfile) => Promise<void>;
+  signInWithEmail: (email: string, password: string, rememberMe: boolean) => Promise<void>;
+  signUpWithEmail: (email: string, password: string, profile: SignupProfile, rememberMe: boolean) => Promise<boolean>;
   updateProfile: (data: {
     name: string;
     username: string;
@@ -58,46 +56,32 @@ const createUsername = (name: string): string => {
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
-  const isSupabase = isSupabaseConfigured();
-  const demoAuthEnabled = import.meta.env.DEV && !isSupabase;
+  const isFirebase = isFirebaseConfigured();
+  const demoAuthEnabled = import.meta.env.DEV && !isFirebase;
 
   useEffect(() => {
     let active = true;
-    const syncUser = async (userId: string | null) => {
-      if (!userId) {
-        if (active) setCurrentUser(null);
-        return;
-      }
-      try {
-        const profile = await DataService.getProfileById(userId);
-        if (active) setCurrentUser(profile);
-      } catch (error) {
-        console.error('Failed to load signed-in profile:', error);
-        if (active) setCurrentUser(null);
-      }
-    };
-
-    if (isSupabase && supabase) {
-      const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-        if (event === 'SIGNED_IN') return;
-        void syncUser(session?.user.id || null);
-      });
-      void supabase.auth.getSession()
-        .then(({ data, error }) => {
-          if (error) throw error;
-          return syncUser(data.session?.user.id || null);
-        })
-        .catch((error: unknown) => {
-          console.error('Could not restore the authentication session:', error);
+    if (isFirebase && auth) {
+      const unsubscribe = onAuthStateChanged(auth, async (user) => {
+        if (!user) {
           if (active) setCurrentUser(null);
-        })
-        .finally(() => {
           if (active) setLoading(false);
-        });
+          return;
+        }
+        try {
+          const profile = await DataService.getProfileById(user.uid);
+          if (active) setCurrentUser(profile);
+        } catch (error) {
+          console.error('Failed to load signed-in Firebase profile:', error);
+          if (active) setCurrentUser(null);
+        } finally {
+          if (active) setLoading(false);
+        }
+      });
 
       return () => {
         active = false;
-        subscription.unsubscribe();
+        unsubscribe();
       };
     }
 
@@ -106,101 +90,96 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => {
       active = false;
     };
-  }, [isSupabase]);
+  }, [isFirebase]);
 
-  const requestPhoneOtp = async (phone: string, rememberMe: boolean, profile?: SignupProfile): Promise<string> => {
-    if (!supabase) {
-      throw new Error('Phone OTP sign-in requires a configured Supabase project with SMS authentication enabled.');
-    }
-
-    const normalizedPhone = normalizePhoneNumber(phone);
-    if (profile) validateProfile({ ...profile, mobile_number: normalizedPhone });
-    setRememberMePreference(rememberMe);
-
-    const { error } = await supabase.auth.signInWithOtp({
-      phone: normalizedPhone,
-      options: {
-        shouldCreateUser: Boolean(profile),
-        ...(profile
-          ? {
-              data: {
-                name: profile.name.trim(),
-                username: createUsername(profile.name),
-                mobile_number: normalizedPhone,
-                date_of_birth: profile.date_of_birth
-              }
-            }
-          : {})
-      }
-    });
-    if (error) throw error;
-    return normalizedPhone;
-  };
-
-  const verifyPhoneOtp = async (
-    phone: string,
-    token: string,
-    rememberMe: boolean,
-    signupProfile?: SignupProfile
-  ): Promise<void> => {
-    if (!supabase) {
-      throw new Error('Phone OTP sign-in requires a configured Supabase project with SMS authentication enabled.');
-    }
-
-    const normalizedPhone = normalizePhoneNumber(phone);
-    setRememberMePreference(rememberMe);
-    const { data, error } = await supabase.auth.verifyOtp({
-      phone: normalizedPhone,
-      token: token.trim(),
-      type: 'sms'
-    });
-    if (error) throw error;
-    if (!data.user) throw new Error('OTP verification did not return an authenticated account.');
-
-    let profile = await DataService.getProfileById(data.user.id);
-    if (!profile && signupProfile) {
-      validateProfile({ ...signupProfile, mobile_number: normalizedPhone });
-      profile = await DataService.saveProfile({
-        id: data.user.id,
-        name: signupProfile.name.trim(),
-        username: createUsername(signupProfile.name),
-        mobile_number: normalizedPhone,
-        date_of_birth: signupProfile.date_of_birth,
-        created_at: data.user.created_at || new Date().toISOString()
-      });
-    }
-
+  const syncSignedInUser = async (userId: string): Promise<Profile> => {
+    const profile = await DataService.getProfileById(userId);
     if (!profile) {
-      await supabase.auth.signOut();
-      throw new Error('No profile is registered for this phone number. Create an account first.');
+      if (auth?.currentUser) await firebaseSignOut(auth);
+      throw new Error('No profile is registered for this account. Contact support.');
     }
     setCurrentUser(profile);
+    return profile;
   };
 
-  const continueWithoutOtp = async (phone: string, signupProfile?: SignupProfile): Promise<void> => {
-    if (!demoAuthEnabled || isSupabase) {
-      throw new Error('OTP can only be skipped in local development demo mode.');
-    }
+  const signInWithEmail = async (email: string, password: string, rememberMe: boolean): Promise<void> => {
+    const normalizedEmail = email.trim().toLowerCase();
+    await setRememberMePreference(rememberMe);
 
-    const normalizedPhone = normalizePhoneNumber(phone);
-    if (signupProfile) {
-      validateProfile({ ...signupProfile, mobile_number: normalizedPhone });
-      const profile = await DataService.saveProfile({
-        id: crypto.randomUUID(),
-        name: signupProfile.name.trim(),
-        username: createUsername(signupProfile.name),
-        mobile_number: normalizedPhone,
-        date_of_birth: signupProfile.date_of_birth,
-        created_at: new Date().toISOString()
-      });
+    if (demoAuthEnabled) {
+      if (!await DataService.verifyLocalEmailPassword(normalizedEmail, password)) {
+        throw new Error('Incorrect email or password.');
+      }
+      const profile = DataService.getLocalProfileByEmail(normalizedEmail);
+      if (!profile) throw new Error('The local account profile could not be found.');
+      DataService.setLocalActiveUser(profile.id);
       setCurrentUser(profile);
       return;
     }
+    if (!auth) throw new Error('Email sign-in requires a configured Firebase project.');
 
-    const profile = DataService.getLocalProfileByPhone(normalizedPhone);
-    if (!profile) throw new Error('No local demo account exists for this number. Choose Sign Up to create one.');
-    DataService.setLocalActiveUser(profile.id);
-    setCurrentUser(profile);
+    const { user } = await signInWithEmailAndPassword(auth, normalizedEmail, password);
+    if (!user.emailVerified) {
+      try {
+        await sendEmailVerification(user, { url: window.location.origin });
+      } finally {
+        await firebaseSignOut(auth);
+      }
+      throw new Error('Confirm your email with the verification link we sent before signing in.');
+    }
+    await syncSignedInUser(user.uid);
+  };
+
+  const signUpWithEmail = async (
+    email: string,
+    password: string,
+    signupProfile: SignupProfile,
+    rememberMe: boolean
+  ): Promise<boolean> => {
+    const normalizedEmail = email.trim().toLowerCase();
+    validateProfile(signupProfile);
+    if (password.length < 8) throw new Error('Password must be at least 8 characters.');
+    await setRememberMePreference(rememberMe);
+
+    const profileData = {
+      name: signupProfile.name.trim(),
+      username: createUsername(signupProfile.name),
+      mobile_number: '',
+      date_of_birth: signupProfile.date_of_birth
+    };
+
+    if (demoAuthEnabled) {
+      if (DataService.getLocalProfileByEmail(normalizedEmail)) {
+        throw new Error('An account already exists for this email.');
+      }
+      const profile = await DataService.saveProfile({
+        id: crypto.randomUUID(),
+        ...profileData,
+        email: normalizedEmail,
+        created_at: new Date().toISOString()
+      });
+      await DataService.saveLocalEmailPassword(normalizedEmail, password);
+      setCurrentUser(profile);
+      return true;
+    }
+    if (!auth || !firestore) throw new Error('Email sign-up requires a configured Firebase project.');
+
+    const { user } = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
+    try {
+      await updateFirebaseProfile(user, { displayName: profileData.name });
+      await DataService.saveProfile({
+        id: user.uid,
+        ...profileData,
+        email: user.email || normalizedEmail,
+        created_at: user.metadata.creationTime || new Date().toISOString()
+      });
+      await sendEmailVerification(user, { url: window.location.origin });
+      await firebaseSignOut(auth);
+    } catch (error) {
+      await firebaseSignOut(auth);
+      throw error;
+    }
+    return false;
   };
 
   const updateProfile = async (data: {
@@ -221,7 +200,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!/^[a-zA-Z0-9_]{3,30}$/.test(normalizedData.username)) {
       throw new Error('Username must be 3 to 30 letters, numbers, or underscores.');
     }
-    if (!/^[0-9+ -]{8,15}$/.test(normalizedData.mobile_number)) {
+    if (normalizedData.mobile_number && !/^[0-9+ -]{8,15}$/.test(normalizedData.mobile_number)) {
       throw new Error('Enter a valid mobile number.');
     }
 
@@ -230,9 +209,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signOut = async () => {
-    if (isSupabase && supabase) {
-      const { error } = await supabase.auth.signOut();
-      if (error) throw error;
+    if (isFirebase && auth) {
+      await firebaseSignOut(auth);
     } else {
       DataService.clearActiveUser();
     }
@@ -243,12 +221,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <AuthContext.Provider
       value={{
         currentUser,
-        isSupabase,
+        isFirebase,
         demoAuthEnabled,
         loading,
-        requestPhoneOtp,
-        verifyPhoneOtp,
-        continueWithoutOtp,
+        signInWithEmail,
+        signUpWithEmail,
         updateProfile,
         signOut
       }}

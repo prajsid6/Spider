@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Phone, PhoneOff, Volume2 } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { httpsCallable } from 'firebase/functions';
+import { child, onChildAdded, push, ref, remove, set, type DatabaseReference } from 'firebase/database';
+import { auth, functions, realtimeDatabase } from '../lib/firebase';
 import { useToast } from '../context/ToastContext';
 
 interface InAppCallProps {
@@ -10,10 +12,17 @@ interface InAppCallProps {
 }
 
 type CallStatus = 'idle' | 'incoming' | 'connecting' | 'active';
-type CallSignal = {
-  callId: string;
+type CallSignalType = 'call-offer' | 'call-answer' | 'ice-candidate' | 'call-hangup' | 'call-decline';
+type CallSignalPayload = {
   description?: RTCSessionDescriptionInit;
   candidate?: RTCIceCandidateInit;
+};
+type CallSignal = {
+  type: CallSignalType;
+  callId: string;
+  senderId: string;
+  createdAt: number;
+  payload: CallSignalPayload;
 };
 
 export const InAppCall: React.FC<InAppCallProps> = ({ requestId, offerId, otherUsername }) => {
@@ -23,7 +32,8 @@ export const InAppCall: React.FC<InAppCallProps> = ({ requestId, offerId, otherU
   const [error, setError] = useState('');
   const [muted, setMuted] = useState(false);
   const remoteAudio = useRef<HTMLAudioElement>(null);
-  const channelRef = useRef<ReturnType<NonNullable<typeof supabase>['channel']> | null>(null);
+  const signalPathRef = useRef<DatabaseReference | null>(null);
+  const signalRecordsRef = useRef<Map<string, CallSignal>>(new Map());
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const callIdRef = useRef<string | null>(null);
@@ -36,13 +46,24 @@ export const InAppCall: React.FC<InAppCallProps> = ({ requestId, offerId, otherU
   }, [status]);
 
   useEffect(() => {
-    if (!supabase) return;
-    const client = supabase;
+    if (!realtimeDatabase || !functions) {
+      setChannelReady(false);
+      setError('In-app calling requires Firebase to be configured. Check the Firebase calling setup.');
+      return;
+    }
+
     const audioElement = remoteAudio.current;
-    const channel = client.channel(`spider-call:${requestId}:${offerId}`, {
-      config: { private: true, broadcast: { self: false } }
-    });
-    channelRef.current = channel;
+    const signalPath = ref(realtimeDatabase, `callSignals/${requestId}/${offerId}`);
+    signalPathRef.current = signalPath;
+
+    const cleanupCallSignals = async (callId: string) => {
+      const currentSignals = Array.from(signalRecordsRef.current.entries())
+        .filter(([, signal]) => signal.callId === callId);
+      await Promise.all(currentSignals.map(async ([key]) => {
+        await remove(child(signalPath, key));
+        signalRecordsRef.current.delete(key);
+      }));
+    };
 
     const addPendingCandidates = async (peer: RTCPeerConnection, callId: string) => {
       const candidates = pendingCandidatesRef.current.filter((item) => item.callId === callId);
@@ -50,40 +71,35 @@ export const InAppCall: React.FC<InAppCallProps> = ({ requestId, offerId, otherU
       await Promise.all(candidates.map(({ candidate }) => peer.addIceCandidate(candidate)));
     };
 
-    channel
-      .on('broadcast', { event: 'call-offer' }, ({ payload }) => {
-        const signal = payload as CallSignal;
-        if (statusRef.current === 'idle' && signal.callId && signal.description) {
-          callIdRef.current = signal.callId;
-          incomingOfferRef.current = signal.description;
-          setError('');
-          setStatus('incoming');
-        }
-      })
-      .on('broadcast', { event: 'call-answer' }, ({ payload }) => {
-        const signal = payload as CallSignal;
+    const unsubscribe = onChildAdded(signalPath, (snapshot) => {
+      const signal = snapshot.val() as CallSignal | null;
+      if (!signal || !signal.type || !signal.callId || !signal.senderId) return;
+      signalRecordsRef.current.set(snapshot.key ?? '', signal);
+      if (signal.senderId === auth?.currentUser?.uid) return;
+
+      if (signal.type === 'call-offer' && statusRef.current === 'idle' && signal.payload?.description) {
+        callIdRef.current = signal.callId;
+        incomingOfferRef.current = signal.payload.description;
+        setError('');
+        setStatus('incoming');
+      } else if (signal.type === 'call-answer') {
         const peer = peerRef.current;
-        if (peer && signal.callId === callIdRef.current && signal.description) {
-          void peer.setRemoteDescription(signal.description)
+        if (peer && signal.callId === callIdRef.current && signal.payload?.description) {
+          void peer.setRemoteDescription(signal.payload.description)
             .then(() => addPendingCandidates(peer, signal.callId))
             .catch((answerError: unknown) => setError(answerError instanceof Error ? answerError.message : 'Could not connect the call.'));
         }
-      })
-      .on('broadcast', { event: 'ice-candidate' }, ({ payload }) => {
-        const signal = payload as CallSignal;
-        if (!signal.callId || !signal.candidate) return;
+      } else if (signal.type === 'ice-candidate' && signal.payload?.candidate) {
         const peer = peerRef.current;
         if (peer && signal.callId === callIdRef.current && peer.remoteDescription) {
-          void peer.addIceCandidate(signal.candidate).catch((candidateError: unknown) => {
+          void peer.addIceCandidate(signal.payload.candidate).catch((candidateError: unknown) => {
             setError(candidateError instanceof Error ? candidateError.message : 'Call connection failed.');
           });
         } else {
-          pendingCandidatesRef.current.push({ callId: signal.callId, candidate: signal.candidate });
+          pendingCandidatesRef.current.push({ callId: signal.callId, candidate: signal.payload.candidate });
         }
-      })
-      .on('broadcast', { event: 'call-hangup' }, ({ payload }) => {
-        const signal = payload as CallSignal;
-        if (signal.callId && signal.callId === callIdRef.current) {
+      } else if (signal.type === 'call-hangup' || signal.type === 'call-decline') {
+        if (signal.callId === callIdRef.current) {
           callIdRef.current = null;
           incomingOfferRef.current = null;
           peerRef.current?.close();
@@ -92,52 +108,106 @@ export const InAppCall: React.FC<InAppCallProps> = ({ requestId, offerId, otherU
           localStreamRef.current = null;
           if (remoteAudio.current) remoteAudio.current.srcObject = null;
           setStatus('idle');
-          showToast('The other person ended the call.', 'info');
+          if (signal.type === 'call-hangup') {
+            showToast('The other person ended the call.', 'info');
+          } else {
+            setError('The other person declined the call.');
+          }
+          void cleanupCallSignals(signal.callId).catch(() => {
+            setError('Could not clean up Firebase call signals.');
+          });
         }
-      })
-      .on('broadcast', { event: 'call-decline' }, ({ payload }) => {
-        const signal = payload as CallSignal;
-        if (signal.callId && signal.callId === callIdRef.current) {
-          callIdRef.current = null;
-          incomingOfferRef.current = null;
-          peerRef.current?.close();
-          peerRef.current = null;
-          localStreamRef.current?.getTracks().forEach((track) => track.stop());
-          localStreamRef.current = null;
-          if (remoteAudio.current) remoteAudio.current.srcObject = null;
-          setStatus('idle');
-          setError('The other person declined the call.');
-        }
-      })
-      .subscribe((state) => {
-        if (state === 'SUBSCRIBED') setChannelReady(true);
-        if (state === 'CHANNEL_ERROR' || state === 'TIMED_OUT' || state === 'CLOSED') {
-          setChannelReady(false);
-          setError('Could not connect to call service. Check the Supabase calling setup.');
-        }
-      });
+      }
+    }, () => {
+      setChannelReady(false);
+      setError('Could not connect to call service. Check the Firebase Realtime Database setup.');
+    });
+
+    setChannelReady(true);
 
     return () => {
-      if (callIdRef.current) {
-        void channel.send({
-          type: 'broadcast',
-          event: 'call-hangup',
-          payload: { callId: callIdRef.current }
-        });
+      const currentCallId = callIdRef.current;
+      if (currentCallId) {
+        const senderId = auth?.currentUser?.uid;
+        if (senderId) {
+          const signalRef = push(signalPath);
+          if (signalRef.key) {
+            const signal: CallSignal = {
+              type: 'call-hangup',
+              callId: currentCallId,
+              senderId,
+              createdAt: Date.now(),
+              payload: {}
+            };
+            void set(signalRef, signal).then(() => {
+              signalRecordsRef.current.set(signalRef.key as string, signal);
+              window.setTimeout(() => {
+                void cleanupCallSignals(currentCallId).catch(() => undefined);
+              }, 1500);
+            }).catch(() => undefined);
+          }
+        }
       }
-      channelRef.current = null;
+      unsubscribe();
+      signalPathRef.current = null;
       peerRef.current?.close();
       peerRef.current = null;
       localStreamRef.current?.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
       if (audioElement) audioElement.srcObject = null;
-      void client.removeChannel(channel);
+      setChannelReady(false);
     };
   }, [requestId, offerId, showToast]);
 
+  const getIceServers = async () => {
+    if (!functions) {
+      throw new Error('In-app calling requires Firebase Functions to be configured.');
+    }
+    try {
+      const getTurnCredentials = httpsCallable(functions, 'getTurnCredentials');
+      const result = await getTurnCredentials({ requestId, offerId });
+      const data = result.data as { iceServers?: RTCIceServer[] } | undefined;
+      if (!data?.iceServers?.length) {
+        throw new Error('Call connection settings are unavailable. Check the Firebase calling setup.');
+      }
+      return data.iceServers;
+    } catch (turnError) {
+      if (turnError instanceof Error && turnError.message.includes('Firebase')) throw turnError;
+      throw new Error('Could not get TURN credentials from Firebase. Check the Firebase Functions setup.');
+    }
+  };
+
+  const publishSignal = async (
+    type: CallSignalType,
+    callId: string,
+    payload: CallSignalPayload
+  ) => {
+    const senderId = auth?.currentUser?.uid;
+    const signalPath = signalPathRef.current;
+    if (!senderId) throw new Error('You must be signed in with Firebase to place a call.');
+    if (!signalPath) throw new Error('In-app calling requires a configured Firebase Realtime Database.');
+
+    const signalRef = push(signalPath);
+    if (!signalRef.key) throw new Error('Could not create a Firebase call signal.');
+    const signal: CallSignal = { type, callId, senderId, createdAt: Date.now(), payload };
+    await set(signalRef, signal);
+    signalRecordsRef.current.set(signalRef.key, signal);
+  };
+
+  const cleanupCallSignals = async (callId: string) => {
+    const signalPath = signalPathRef.current;
+    if (!signalPath) return;
+    const currentSignals = Array.from(signalRecordsRef.current.entries())
+      .filter(([, signal]) => signal.callId === callId);
+    await Promise.all(currentSignals.map(async ([key]) => {
+      await remove(child(signalPath, key));
+      signalRecordsRef.current.delete(key);
+    }));
+  };
+
   const startCall = async () => {
-    if (!supabase || !channelRef.current) {
-      setError('In-app calling requires a configured Supabase project.');
+    if (!realtimeDatabase || !signalPathRef.current) {
+      setError('In-app calling requires a configured Firebase project and Realtime Database.');
       return;
     }
     setError('');
@@ -145,46 +215,29 @@ export const InAppCall: React.FC<InAppCallProps> = ({ requestId, offerId, otherU
     callIdRef.current = callId;
     setStatus('connecting');
     try {
-      const peer = await (async () => {
-        const { data, error: turnError } = await supabase.functions.invoke('turn-credentials', {
-          body: { requestId, offerId }
-        });
-        if (turnError) throw new Error('Calling is not configured yet. Please try again later.');
-        if (!data?.iceServers?.length) throw new Error('Call connection settings are unavailable.');
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-        localStreamRef.current = stream;
-        const connection = new RTCPeerConnection({ iceServers: data.iceServers });
-        peerRef.current = connection;
-        stream.getTracks().forEach((track) => connection.addTrack(track, stream));
-        connection.ontrack = (event) => {
-          if (remoteAudio.current) remoteAudio.current.srcObject = event.streams[0];
-        };
-        connection.onicecandidate = (event) => {
-          if (!event.candidate) return;
-          void channelRef.current?.send({
-            type: 'broadcast',
-            event: 'ice-candidate',
-            payload: { callId, candidate: event.candidate.toJSON() }
-          }).then((result) => {
-            if (result !== 'ok') setError('Could not send call connection data.');
-          }).catch(() => setError('Could not send call connection data.'));
-        };
-        connection.onconnectionstatechange = () => {
-          if (connection.connectionState === 'connected') setStatus('active');
-          if (connection.connectionState === 'failed') setError('Could not connect the call. Check your network and try again.');
-        };
-        return connection;
-      })();
+      const iceServers = await getIceServers();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      localStreamRef.current = stream;
+      const peer = new RTCPeerConnection({ iceServers });
+      peerRef.current = peer;
+      stream.getTracks().forEach((track) => peer.addTrack(track, stream));
+      peer.ontrack = (event) => {
+        if (remoteAudio.current) remoteAudio.current.srcObject = event.streams[0];
+      };
+      peer.onicecandidate = (event) => {
+        if (!event.candidate) return;
+        void publishSignal('ice-candidate', callId, { candidate: event.candidate.toJSON() })
+          .catch(() => setError('Could not send Firebase call connection data.'));
+      };
+      peer.onconnectionstatechange = () => {
+        if (peer.connectionState === 'connected') setStatus('active');
+        if (peer.connectionState === 'failed') setError('Could not connect the call. Check your network and try again.');
+      };
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
-      const result = await channelRef.current.send({
-        type: 'broadcast',
-        event: 'call-offer',
-        payload: { callId, description: peer.localDescription }
-      });
-      if (result !== 'ok') throw new Error('Could not start the call.');
+      await publishSignal('call-offer', callId, { description: peer.localDescription ?? undefined });
     } catch (callError) {
-      setError(callError instanceof Error ? callError.message : 'Could not start the call.');
+      setError(callError instanceof Error ? callError.message : 'Could not start the Firebase call.');
       peerRef.current?.close();
       peerRef.current = null;
       localStreamRef.current?.getTracks().forEach((track) => track.stop());
@@ -195,18 +248,14 @@ export const InAppCall: React.FC<InAppCallProps> = ({ requestId, offerId, otherU
   };
 
   const answerCall = async () => {
-    if (!supabase || !callIdRef.current || !incomingOfferRef.current) return;
+    if (!realtimeDatabase || !callIdRef.current || !incomingOfferRef.current) return;
     setError('');
     setStatus('connecting');
     try {
-      const { data, error: turnError } = await supabase.functions.invoke('turn-credentials', {
-        body: { requestId, offerId }
-      });
-      if (turnError) throw new Error('Calling is not configured yet. Please try again later.');
-      if (!data?.iceServers?.length) throw new Error('Call connection settings are unavailable.');
+      const iceServers = await getIceServers();
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       localStreamRef.current = stream;
-      const peer = new RTCPeerConnection({ iceServers: data.iceServers });
+      const peer = new RTCPeerConnection({ iceServers });
       peerRef.current = peer;
       stream.getTracks().forEach((track) => peer.addTrack(track, stream));
       peer.ontrack = (event) => {
@@ -215,13 +264,8 @@ export const InAppCall: React.FC<InAppCallProps> = ({ requestId, offerId, otherU
       const callId = callIdRef.current;
       peer.onicecandidate = (event) => {
         if (!event.candidate) return;
-        void channelRef.current?.send({
-          type: 'broadcast',
-          event: 'ice-candidate',
-          payload: { callId, candidate: event.candidate.toJSON() }
-        }).then((result) => {
-          if (result !== 'ok') setError('Could not send call connection data.');
-        }).catch(() => setError('Could not send call connection data.'));
+        void publishSignal('ice-candidate', callId, { candidate: event.candidate.toJSON() })
+          .catch(() => setError('Could not send Firebase call connection data.'));
       };
       peer.onconnectionstatechange = () => {
         if (peer.connectionState === 'connected') setStatus('active');
@@ -233,14 +277,9 @@ export const InAppCall: React.FC<InAppCallProps> = ({ requestId, offerId, otherU
       await Promise.all(candidates.map(({ candidate }) => peer.addIceCandidate(candidate)));
       const answer = await peer.createAnswer();
       await peer.setLocalDescription(answer);
-      const result = await channelRef.current?.send({
-        type: 'broadcast',
-        event: 'call-answer',
-        payload: { callId, description: peer.localDescription }
-      });
-      if (result !== 'ok') throw new Error('Could not answer the call.');
+      await publishSignal('call-answer', callId, { description: peer.localDescription ?? undefined });
     } catch (callError) {
-      setError(callError instanceof Error ? callError.message : 'Could not answer the call.');
+      setError(callError instanceof Error ? callError.message : 'Could not answer the Firebase call.');
       peerRef.current?.close();
       peerRef.current = null;
       localStreamRef.current?.getTracks().forEach((track) => track.stop());
@@ -252,11 +291,16 @@ export const InAppCall: React.FC<InAppCallProps> = ({ requestId, offerId, otherU
   const endCall = async (decline = false) => {
     const callId = callIdRef.current;
     if (callId) {
-      await channelRef.current?.send({
-        type: 'broadcast',
-        event: decline ? 'call-decline' : 'call-hangup',
-        payload: { callId }
-      });
+      try {
+        await publishSignal(decline ? 'call-decline' : 'call-hangup', callId, {});
+        window.setTimeout(() => {
+          void cleanupCallSignals(callId).catch(() => {
+            setError('Could not clean up Firebase call signals.');
+          });
+        }, 1500);
+      } catch {
+        setError('Could not send Firebase call signals.');
+      }
     }
     callIdRef.current = null;
     incomingOfferRef.current = null;

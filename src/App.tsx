@@ -13,7 +13,7 @@ import { SafetySOSModal } from './components/SafetySOSModal';
 import { OfferHelpModal } from './components/OfferHelpModal';
 import { RequestDetailModal } from './components/RequestDetailModal';
 import { AuthModal } from './components/AuthModal';
-import { SupabaseConfigModal } from './components/SupabaseConfigModal';
+import { FirebaseConfigModal } from './components/FirebaseConfigModal';
 import { triggerSafetySOS } from './services/safetyAlertService';
 import { FeatureSuggestionModal } from './components/FeatureSuggestionModal';
 import {
@@ -193,7 +193,7 @@ const SpiderApp: React.FC = () => {
     } else if (currentTab === 'my-requests') {
       result = result.filter((r) => r.requester_id === currentUser?.id);
     } else if (currentTab === 'my-offers') {
-      // In demo mode or Supabase, filter where user submitted offer
+      // In demo mode or Firebase, filter where user submitted offer
       result = result.filter((r) => {
         // If current user is accepted or offers contain current user
         return r.accepted_offer?.helper_id === currentUser?.id || r.requester_id !== currentUser?.id;
@@ -567,7 +567,7 @@ const SpiderApp: React.FC = () => {
         onClose={() => setIsAuthOpen(false)}
       />
 
-      <SupabaseConfigModal
+      <FirebaseConfigModal
         isOpen={isConfigOpen}
         onClose={() => setIsConfigOpen(false)}
         onReset={() => {

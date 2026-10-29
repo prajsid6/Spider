@@ -24,12 +24,19 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (id.includes('node_modules')) {
-            if (id.includes('@supabase')) {
-              return 'supabase';
-            }
             if (id.includes('lucide-react')) {
               return 'icons';
             }
+            if (id.includes('/node_modules/firebase/auth/')) return 'firebase-auth-api';
+            if (id.includes('/node_modules/firebase/firestore/')) return 'firebase-firestore-api';
+            if (id.includes('/node_modules/firebase/database/')) return 'firebase-database-api';
+            if (id.includes('/node_modules/firebase/functions/')) return 'firebase-functions-api';
+            if (id.includes('/node_modules/@firebase/auth/')) return 'firebase-auth';
+            if (id.includes('/node_modules/@firebase/firestore/')) return 'firebase-firestore';
+            if (id.includes('/node_modules/@firebase/database/')) return 'firebase-database';
+            if (id.includes('/node_modules/@firebase/functions/')) return 'firebase-functions';
+            if (id.includes('/node_modules/@firebase/')) return 'firebase-core';
+            if (id.includes('/node_modules/firebase/')) return 'firebase-api';
             return 'vendor';
           }
         }

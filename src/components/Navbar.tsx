@@ -16,7 +16,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenAuthModal,
   onOpenConfigModal
 }) => {
-  const { currentUser, isSupabase, signOut } = useAuth();
+  const { currentUser, isFirebase, signOut } = useAuth();
   const { showToast } = useToast();
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const [accountDetailsOpen, setAccountDetailsOpen] = useState(false);
@@ -38,17 +38,15 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Actions */}
           <div className="flex items-center gap-2 shrink-0">
-            {isSupabase && (
-              <button
-                onClick={onOpenConfigModal}
-                title="Database connection status"
-                className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-spider-elevated border border-spider-border text-xs text-spider-muted hover:border-spider-border/60 transition-colors"
-              >
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_#22C55E]" />
-                <Database className="h-3.5 w-3.5" />
-                <span>Live</span>
-              </button>
-            )}
+            <button
+              onClick={onOpenConfigModal}
+              title="Firebase connection and setup"
+              className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-spider-elevated border border-spider-border text-xs text-spider-muted hover:border-spider-border/60 transition-colors"
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${isFirebase ? 'bg-emerald-400 shadow-[0_0_6px_#22C55E]' : 'bg-amber-400'}`} />
+              <Database className="h-3.5 w-3.5" />
+              <span>{isFirebase ? 'Firebase' : 'Setup'}</span>
+            </button>
 
             {/* User Dropdown */}
             {currentUser ? (
@@ -85,7 +83,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       </div>
                       <div className="mt-2 flex items-center gap-1.5 text-[11px] text-spider-muted">
                         <Shield className="w-3 h-3 text-emerald-400" />
-                        <span className="font-mono">{currentUser.mobile_number}</span>
+                        <span className="font-mono">{currentUser.mobile_number || currentUser.email || 'Email sign-in'}</span>
                       </div>
                     </div>
 

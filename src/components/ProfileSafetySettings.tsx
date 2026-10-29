@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { AlertTriangle, Bell, BellOff, LocateFixed, Save } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
-import { isSupabaseConfigured } from '../lib/supabase';
+import { isFirebaseConfigured } from '../lib/firebase';
 import {
   DEFAULT_SAFETY_ALERT_PREFERENCES,
   disableNearbySafetyAlerts,
@@ -30,7 +30,7 @@ export const ProfileSafetySettings: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const backendConfigured = isSupabaseConfigured();
+  const backendConfigured = isFirebaseConfigured();
 
   useEffect(() => {
     let active = true;
@@ -160,7 +160,7 @@ export const ProfileSafetySettings: React.FC = () => {
       </div>
       {loading && <p className="mt-2 text-[11px] text-spider-muted">Loading safety settings...</p>}
       {error && <p role="alert" className="mt-2 text-[11px] font-medium text-red-700">{error}</p>}
-      {!backendConfigured && <p className="mt-2 text-[11px] font-medium text-amber-800">Push alerts require the live Supabase and VAPID setup. Preferences are saved on this browser in demo mode.</p>}
+      {!backendConfigured && <p className="mt-2 text-[11px] font-medium text-amber-800">Push alerts require Firebase Cloud Functions and Firebase Cloud Messaging setup. Preferences are saved on this browser in demo mode.</p>}
       <p className="mt-3 text-[10px] leading-relaxed text-spider-muted">
         Enabling alerts stores your approximate location on this browser until you disable them. Your selected radius and limit apply only to SOS alerts you send.
       </p>

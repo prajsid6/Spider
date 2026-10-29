@@ -11,8 +11,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.118.0",
     "autoprefixer": "^10.6.2",
+    "firebase": "^13.1.0",
     "lucide-react": "^1.63.0",
     "postcss": "^8.5.32",
     "react": "^19.3.1",

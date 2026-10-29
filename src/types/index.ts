@@ -5,6 +5,7 @@ export interface Profile {
   id: string;
   name: string;
   username: string;
+  email?: string;
   mobile_number: string;
   date_of_birth: string; // YYYY-MM-DD
   created_at: string;
@@ -29,6 +30,7 @@ export interface HelpRequest {
   created_at: string;
   is_emergency?: boolean;
   expires_at?: string | null;
+  accepted_offer_id?: string;
   // Joined or calculated fields
   requester?: PublicProfile;
   offers_count?: number;

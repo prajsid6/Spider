@@ -5,7 +5,7 @@ dist
 .vscode
 .env
 .env.local
+.env.production
 *.log
 npm-debug.log*
 .DS_Store
-
