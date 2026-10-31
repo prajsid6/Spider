@@ -32,7 +32,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className="text-black text-lg font-black">🕷</span>
             </div>
             <div>
-              <span className="text-xl font-black tracking-tight text-spider-text">Spider</span>
+              <span className="text-xl font-black tracking-tight text-spider-text">Hanuman</span>
             </div>
           </div>
 

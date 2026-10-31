@@ -1,5 +1,6 @@
 export type RequestStatus = 'Open' | 'Connected' | 'Completed';
 export type OfferStatus = 'Pending' | 'Accepted' | 'Declined';
+export type ConnectionMode = 'virtual' | 'in_person';
 
 export interface Profile {
   id: string;
@@ -26,9 +27,11 @@ export interface HelpRequest {
   description: string;
   details?: string | null;
   budget_inr?: number | null;
+  connection_mode?: ConnectionMode;
   status: RequestStatus;
   created_at: string;
   is_emergency?: boolean;
+  is_demo?: boolean;
   expires_at?: string | null;
   accepted_offer_id?: string;
   // Joined or calculated fields
@@ -66,6 +69,7 @@ export interface NewRequestPayload {
   description: string;
   details?: string;
   budget_inr?: number;
+  connection_mode?: ConnectionMode;
   is_emergency?: boolean;
   expires_at?: string;
 }

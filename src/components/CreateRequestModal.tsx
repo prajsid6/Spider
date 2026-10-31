@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { DataService } from '../services/dataService';
 import type { HelpRequest } from '../types';
-import { X, IndianRupee, Sparkles, AlertCircle } from 'lucide-react';
+import { X, IndianRupee, Sparkles, AlertCircle, MapPin, Video } from 'lucide-react';
 
 interface CreateRequestModalProps {
   isOpen: boolean;
@@ -21,6 +21,7 @@ export const CreateRequestModal: React.FC<CreateRequestModalProps> = ({
   const [description, setDescription] = useState('');
   const [details, setDetails] = useState('');
   const [budgetInr, setBudgetInr] = useState<string>('');
+  const [connectionMode, setConnectionMode] = useState<'virtual' | 'in_person'>('virtual');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,11 +53,13 @@ export const CreateRequestModal: React.FC<CreateRequestModalProps> = ({
       const created = await DataService.createRequest(currentUser.id, {
         description: trimmedDesc,
         details: details.trim() || undefined,
-        budget_inr: parsedBudget
+        budget_inr: parsedBudget,
+        connection_mode: connectionMode
       });
       setDescription('');
       setDetails('');
       setBudgetInr('');
+      setConnectionMode('virtual');
       onSuccess(created);
       onClose();
     } catch (err: any) {
@@ -166,6 +169,42 @@ export const CreateRequestModal: React.FC<CreateRequestModalProps> = ({
               />
             </div>
           </div>
+
+          <fieldset>
+            <legend className="text-xs font-bold text-spider-text mb-1.5">How would you like to connect?</legend>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className={`flex cursor-pointer items-start gap-2.5 rounded-xl border p-3 transition-colors ${connectionMode === 'virtual' ? 'border-spider-primary bg-spider-primary/5' : 'border-spider-border bg-white'}`}>
+                <input
+                  type="radio"
+                  name="connectionMode"
+                  value="virtual"
+                  checked={connectionMode === 'virtual'}
+                  onChange={() => setConnectionMode('virtual')}
+                  className="mt-0.5 accent-spider-primary"
+                />
+                <Video className="h-4 w-4 shrink-0 text-spider-primary" />
+                <span>
+                  <span className="block text-xs font-bold text-spider-text">Virtual</span>
+                  <span className="mt-0.5 block text-[11px] text-spider-muted">Connect by in-app call</span>
+                </span>
+              </label>
+              <label className={`flex cursor-pointer items-start gap-2.5 rounded-xl border p-3 transition-colors ${connectionMode === 'in_person' ? 'border-spider-primary bg-spider-primary/5' : 'border-spider-border bg-white'}`}>
+                <input
+                  type="radio"
+                  name="connectionMode"
+                  value="in_person"
+                  checked={connectionMode === 'in_person'}
+                  onChange={() => setConnectionMode('in_person')}
+                  className="mt-0.5 accent-spider-primary"
+                />
+                <MapPin className="h-4 w-4 shrink-0 text-spider-primary" />
+                <span>
+                  <span className="block text-xs font-bold text-spider-text">Meet in person</span>
+                  <span className="mt-0.5 block text-[11px] text-spider-muted">Arrange an offline meetup</span>
+                </span>
+              </label>
+            </div>
+          </fieldset>
 
           <div className="pt-1 text-[11px] text-spider-muted">
             Posting as: <strong className="text-spider-text">{currentUser ? `${currentUser.name} (@${currentUser.username})` : 'Not signed in'}</strong>

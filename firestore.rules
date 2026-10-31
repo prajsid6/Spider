@@ -5,6 +5,18 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function validUsername(username) {
+      return username is string && username.matches('^[a-z0-9_]{3,30}$');
+    }
+
+    function ownsUsernameClaim(username, userId) {
+      let claimPath = /databases/$(database)/documents/usernameClaims/$(username);
+      return validUsername(username)
+        && existsAfter(claimPath)
+        && getAfter(claimPath).data.uid == userId
+        && getAfter(claimPath).data.username == username;
+    }
+
     function canRateParticipant(requestId, raterId, rateeId) {
       let requestPath = /databases/$(database)/documents/requests/$(requestId);
       let offerByRateePath = /databases/$(database)/documents/offers/$(requestId + '_' + rateeId);
@@ -29,7 +41,32 @@ service cloud.firestore {
     }
 
     match /profiles/{userId} {
-      allow read, create, update, delete: if signedIn() && request.auth.uid == userId;
+      allow read, delete: if signedIn() && request.auth.uid == userId;
+      allow create, update: if signedIn()
+        && request.auth.uid == userId
+        && ownsUsernameClaim(request.resource.data.username, userId);
+    }
+
+    match /usernameClaims/{username} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && !exists(/databases/$(database)/documents/usernameClaims/$(username))
+        && request.resource.data.keys().hasOnly(['uid', 'username'])
+        && request.resource.data.uid == request.auth.uid
+        && validUsername(request.resource.data.username)
+        && request.resource.data.username == username;
+      allow update: if signedIn()
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid', 'username'])
+        && request.resource.data.uid == request.auth.uid
+        && validUsername(request.resource.data.username)
+        && request.resource.data.username == username;
+      allow delete: if signedIn()
+        && resource.data.uid == request.auth.uid
+        && (
+          !existsAfter(/databases/$(database)/documents/publicProfiles/$(request.auth.uid))
+          || getAfter(/databases/$(database)/documents/publicProfiles/$(request.auth.uid)).data.username != username
+        );
     }
 
     match /publicProfiles/{userId} {
@@ -37,7 +74,9 @@ service cloud.firestore {
       allow create, update: if signedIn()
         && request.auth.uid == userId
         && request.resource.data.keys().hasOnly(['id', 'name', 'username', 'created_at', 'avatar_color'])
-        && request.resource.data.id == userId;
+        && request.resource.data.id == userId
+        && validUsername(request.resource.data.username)
+        && ownsUsernameClaim(request.resource.data.username, userId);
       allow delete: if signedIn() && request.auth.uid == userId;
     }
 
@@ -49,9 +88,10 @@ service cloud.firestore {
         && request.resource.data.description.size() >= 5
         && request.resource.data.description.size() <= 1000
         && request.resource.data.is_emergency is bool
+        && request.resource.data.connection_mode in ['virtual', 'in_person']
         && request.resource.data.status == 'Open'
         && request.resource.data.keys().hasOnly([
-          'id', 'requester_id', 'description', 'details', 'budget_inr',
+          'id', 'requester_id', 'description', 'details', 'budget_inr', 'connection_mode',
           'status', 'created_at', 'is_emergency', 'expires_at',
           'offers_count', 'requester', 'accepted_offer'
         ]);

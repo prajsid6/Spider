@@ -36,7 +36,7 @@ export const FirebaseConfigModal: React.FC<FirebaseConfigModalProps> = ({
             </div>
             <div>
               <h2 className="text-lg font-extrabold text-spider-text">Database & Backend Status</h2>
-              <p className="text-xs text-spider-muted">Spider works with local browser storage or Firebase.</p>
+              <p className="text-xs text-spider-muted">Hanuman works with local browser storage or Firebase.</p>
             </div>
           </div>
           <button onClick={onClose} title="Close settings" aria-label="Close settings" className="p-1.5 rounded-full text-spider-muted hover:text-spider-text hover:bg-spider-lavender transition-colors">
@@ -70,7 +70,7 @@ export const FirebaseConfigModal: React.FC<FirebaseConfigModalProps> = ({
             </h4>
             <ol className="text-xs text-spider-muted space-y-2 list-decimal list-inside leading-relaxed">
               <li>Create a Firebase project and register a Web app in the <a href="https://console.firebase.google.com/" target="_blank" rel="noreferrer" className="text-spider-primary font-bold underline inline-flex items-center gap-0.5">Firebase Console <ExternalLink className="w-3 h-3" /></a>.</li>
-              <li>Enable Email/Password in Authentication and create a Cloud Firestore database.</li>
+              <li>Enable Google and Email/Password in Authentication and create a Cloud Firestore database.</li>
               <li>Copy the web app values into the <code>.env</code> file using the keys in <code>.env.example</code>. These web config values are public; secure data with Firebase Rules.</li>
               <li>Deploy <code>firestore.rules</code>, <code>database.rules.json</code>, and Cloud Functions with the Firebase CLI. Configure Functions secrets as described in <code>firebase/README.md</code>.</li>
               <li>Restart the development server after saving configuration.</li>

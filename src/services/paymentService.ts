@@ -69,7 +69,7 @@ export const buyEmergencyExtension = async (requestId: string): Promise<void> =>
       key,
       amount: order.amount,
       currency: order.currency,
-      name: 'Spider',
+      name: 'Hanuman',
       description: 'Emergency request extension',
       order_id: order.id,
       handler: async (response) => {

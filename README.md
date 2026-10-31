@@ -1,6 +1,6 @@
-# Spider
+# Hanuman
 
-Spider is a peer-to-peer paid help marketplace built with React, TypeScript, and Vite.
+Hanuman is a peer-to-peer paid help marketplace built with React, TypeScript, and Vite.
 
 ## Run locally
 
@@ -29,4 +29,4 @@ The Vite build automatically uses the repository subpath for project Pages sites
 
 ## Backend configuration
 
-The app can render in local browser mode without Firebase. Email/password authentication and marketplace data use Firebase Authentication and Cloud Firestore. Safety alerts, emergency payments, and in-app calling require Firebase Cloud Functions, Realtime Database, and their related provider setup. See [`firebase/README.md`](./firebase/README.md).
+The app can render in local browser mode without Firebase and shows four clearly labeled sample community profiles and help requests there. Help requests can specify a virtual (in-app call) or in-person connection preference. Google and email/password authentication and marketplace data use Firebase Authentication and Cloud Firestore. Safety alerts, emergency payments, and in-app calling require Firebase Cloud Functions, Realtime Database, and their related provider setup. See [`firebase/README.md`](./firebase/README.md).

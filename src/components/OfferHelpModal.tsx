@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { DataService } from '../services/dataService';
 import type { HelpRequest, HelpOffer } from '../types';
-import { X, IndianRupee, ShieldCheck, AlertCircle } from 'lucide-react';
+import { X, IndianRupee, ShieldCheck, AlertCircle, MapPin, Video } from 'lucide-react';
 
 interface OfferHelpModalProps {
   request: HelpRequest | null;
@@ -109,6 +109,10 @@ const OfferHelpModalInner: React.FC<InnerProps> = ({
           <p className="text-xs font-bold text-spider-text line-clamp-2">
             {request.description}
           </p>
+          <p className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-spider-muted">
+            {request.connection_mode === 'in_person' ? <MapPin className="h-3 w-3" /> : <Video className="h-3 w-3" />}
+            {request.connection_mode === 'in_person' ? 'Meet in person' : 'Virtual · In-app call'}
+          </p>
           <div className="mt-2 flex items-center justify-between text-xs">
             <span className="text-spider-muted">
               By @{request.requester?.username || 'user'}
@@ -176,7 +180,7 @@ const OfferHelpModalInner: React.FC<InnerProps> = ({
           <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] flex items-start gap-2">
             <ShieldCheck className="w-4 h-4 shrink-0 text-emerald-600 mt-0.5" />
             <span>
-              <strong>Privacy Guaranteed:</strong> Your mobile number stays private. Once your offer is accepted, you can call the requester in Spider using usernames.
+              <strong>Privacy Guaranteed:</strong> Your mobile number stays private. Once your offer is accepted, you can call the requester in Hanuman using usernames.
             </span>
           </div>
 

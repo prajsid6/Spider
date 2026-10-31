@@ -9,6 +9,8 @@ import {
   AlertTriangle,
   IndianRupee,
   Phone,
+  Video,
+  MapPin,
   MessageCircle,
   CheckCircle,
   XCircle,
@@ -188,6 +190,11 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
               <p className="text-xs text-spider-muted">
                 @{request.requester?.username || 'user'}
               </p>
+              {request.is_demo && (
+                <span className="mt-1 inline-flex rounded-full bg-sky-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-sky-700">
+                  Demo profile
+                </span>
+              )}
             </div>
           </div>
 
@@ -240,8 +247,8 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
             
             <p className="text-xs text-spider-muted mb-4">
               {isRequester
-              ? `You accepted the offer from ${acceptedOffer?.helper?.name || 'your helper'}. Call them in Spider to coordinate the task.`
-              : `Your offer was accepted by ${request.requester?.name || 'the requester'}! Call them in Spider to coordinate the task.`}
+              ? `You accepted the offer from ${acceptedOffer?.helper?.name || 'your helper'}. Call them in Hanuman to coordinate the task.`
+              : `Your offer was accepted by ${request.requester?.name || 'the requester'}! Call them in Hanuman to coordinate the task.`}
             </p>
 
             {/* Username-based contact and private in-app calling */}
@@ -356,6 +363,11 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
           <h2 className="text-xl sm:text-2xl font-extrabold text-spider-text leading-snug">
             {request.description}
           </h2>
+
+          <div className="inline-flex items-center gap-2 rounded-xl border border-spider-border bg-spider-soft px-3 py-2 text-xs font-semibold text-spider-text">
+            {request.connection_mode === 'in_person' ? <MapPin className="h-4 w-4 text-spider-primary" /> : <Video className="h-4 w-4 text-spider-primary" />}
+            {request.connection_mode === 'in_person' ? 'Preferred connection: Meet in person' : 'Preferred connection: Virtual · In-app call'}
+          </div>
 
           {request.details && (
             <div className="p-4 rounded-2xl bg-spider-bg/60 border border-spider-border/60">

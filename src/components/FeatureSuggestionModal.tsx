@@ -54,7 +54,7 @@ export const FeatureSuggestionModal: React.FC<FeatureSuggestionModalProps> = ({ 
           </span>
           <div>
             <h2 id="feature-suggestion-title" className="text-lg font-black text-spider-text">Suggest a feature</h2>
-            <p className="text-xs text-spider-muted">Tell us what would make Spider more useful.</p>
+            <p className="text-xs text-spider-muted">Tell us what would make Hanuman more useful.</p>
           </div>
         </div>
         <form onSubmit={handleSubmit} className="mt-4">

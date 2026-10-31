@@ -1,20 +1,31 @@
 import React, { createContext, useEffect, useState } from 'react';
-import { createUserWithEmailAndPassword, onAuthStateChanged, sendEmailVerification, signInWithEmailAndPassword, signOut as firebaseSignOut, updateProfile as updateFirebaseProfile } from 'firebase/auth';
+import { createUserWithEmailAndPassword, GoogleAuthProvider, onAuthStateChanged, sendEmailVerification, signInWithEmailAndPassword, signInWithPopup, signOut as firebaseSignOut, updateProfile as updateFirebaseProfile } from 'firebase/auth';
 import type { Profile } from '../types';
 import { DataService } from '../services/dataService';
 import { auth, firestore, isFirebaseConfigured, setRememberMePreference } from '../lib/firebase';
 
 export interface SignupProfile {
   name: string;
+  mobile_number: string;
   date_of_birth: string;
 }
 
 interface AuthContextType {
   currentUser: Profile | null;
+  demoAccounts: Profile[];
+  googleProfile: Pick<Profile, 'name' | 'username' | 'mobile_number' | 'date_of_birth' | 'email'> | null;
   isFirebase: boolean;
   demoAuthEnabled: boolean;
   loading: boolean;
   signInWithEmail: (email: string, password: string, rememberMe: boolean) => Promise<void>;
+  signInAsDemoAccount: (profileId: string) => Promise<void>;
+  signInWithGoogle: (rememberMe: boolean) => Promise<boolean>;
+  completeGoogleProfile: (data: {
+    name: string;
+    username: string;
+    mobile_number: string;
+    date_of_birth: string;
+  }) => Promise<void>;
   signUpWithEmail: (email: string, password: string, profile: SignupProfile, rememberMe: boolean) => Promise<boolean>;
   updateProfile: (data: {
     name: string;
@@ -44,8 +55,11 @@ const validateProfile = (profile: SignupProfile): void => {
     today.getMonth() < birthDate.getMonth() ||
     (today.getMonth() === birthDate.getMonth() && today.getDate() < birthDate.getDate())
   ) age -= 1;
-  if (age < 13) throw new Error('You must be at least 13 years old to use Spider.');
+  if (age < 13) throw new Error('You must be at least 13 years old to use Hanuman.');
   if (age > 120) throw new Error('Enter a valid date of birth.');
+  if ('mobile_number' in profile && !/^[0-9+ -]{8,15}$/.test(profile.mobile_number.trim())) {
+    throw new Error('Enter a valid mobile number.');
+  }
 };
 
 const createUsername = (name: string): string => {
@@ -55,6 +69,8 @@ const createUsername = (name: string): string => {
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<Profile | null>(null);
+  const [demoAccounts, setDemoAccounts] = useState<Profile[]>([]);
+  const [googleProfile, setGoogleProfile] = useState<AuthContextType['googleProfile']>(null);
   const [loading, setLoading] = useState(true);
   const isFirebase = isFirebaseConfigured();
   const demoAuthEnabled = import.meta.env.DEV && !isFirebase;
@@ -65,12 +81,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const unsubscribe = onAuthStateChanged(auth, async (user) => {
         if (!user) {
           if (active) setCurrentUser(null);
+          if (active) setGoogleProfile(null);
           if (active) setLoading(false);
           return;
         }
         try {
           const profile = await DataService.getProfileById(user.uid);
-          if (active) setCurrentUser(profile);
+          const isGoogleUser = user.providerData.some((provider) => provider.providerId === 'google.com');
+          const isCompleteGoogleProfile = profile?.name && profile.username && profile.mobile_number && profile.date_of_birth;
+          if (active && isGoogleUser && !isCompleteGoogleProfile) {
+            setCurrentUser(null);
+            setGoogleProfile({
+              name: profile?.name || user.displayName || '',
+              username: profile?.username || '',
+              mobile_number: profile?.mobile_number || '',
+              date_of_birth: profile?.date_of_birth || '',
+              email: profile?.email || user.email || ''
+            });
+          } else {
+            if (active) setCurrentUser(profile);
+            if (active) setGoogleProfile(null);
+          }
         } catch (error) {
           console.error('Failed to load signed-in Firebase profile:', error);
           if (active) setCurrentUser(null);
@@ -85,6 +116,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
     }
 
+    if (demoAuthEnabled) {
+      DataService.ensureLocalDemoData();
+      setDemoAccounts(DataService.getLocalDemoProfiles());
+    }
     setCurrentUser(DataService.getCurrentUser());
     setLoading(false);
     return () => {
@@ -130,6 +165,79 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await syncSignedInUser(user.uid);
   };
 
+  const signInAsDemoAccount = async (profileId: string): Promise<void> => {
+    if (!demoAuthEnabled) throw new Error('Demo accounts are only available in local development mode.');
+    const profile = DataService.getLocalDemoProfiles().find((account) => account.id === profileId);
+    if (!profile) throw new Error('That demo account is not available.');
+    DataService.setLocalActiveUser(profile.id);
+    setCurrentUser(profile);
+  };
+
+  const signInWithGoogle = async (rememberMe: boolean): Promise<boolean> => {
+    if (!auth || !firestore) throw new Error('Google sign-in requires a configured Firebase project.');
+    await setRememberMePreference(rememberMe);
+
+    const { user } = await signInWithPopup(auth, new GoogleAuthProvider());
+    const profile = await DataService.getProfileById(user.uid);
+    const isComplete = profile?.name && profile.username && profile.mobile_number && profile.date_of_birth;
+
+    if (isComplete) {
+      setCurrentUser(profile);
+      setGoogleProfile(null);
+      return true;
+    }
+
+    setCurrentUser(null);
+    setGoogleProfile({
+      name: profile?.name || user.displayName || '',
+      username: profile?.username || '',
+      mobile_number: profile?.mobile_number || '',
+      date_of_birth: profile?.date_of_birth || '',
+      email: profile?.email || user.email || ''
+    });
+    return false;
+  };
+
+  const completeGoogleProfile = async (data: {
+    name: string;
+    username: string;
+    mobile_number: string;
+    date_of_birth: string;
+  }): Promise<void> => {
+    const user = auth?.currentUser;
+    if (!user || !user.providerData.some((provider) => provider.providerId === 'google.com')) {
+      throw new Error('Sign in with Google before completing your profile.');
+    }
+
+    const normalizedData = {
+      ...data,
+      name: data.name.trim(),
+      username: data.username.trim().toLowerCase(),
+      mobile_number: data.mobile_number.trim()
+    };
+    validateProfile(normalizedData);
+    if (!/^[a-zA-Z0-9_]{3,30}$/.test(normalizedData.username)) {
+      throw new Error('Username must be 3 to 30 letters, numbers, or underscores.');
+    }
+    if (!await DataService.isUsernameAvailable(normalizedData.username, user.uid)) {
+      throw new Error('That username is already taken. Choose another one.');
+    }
+    if (!/^[0-9+ -]{8,15}$/.test(normalizedData.mobile_number)) {
+      throw new Error('Enter a valid mobile number.');
+    }
+
+    await updateFirebaseProfile(user, { displayName: normalizedData.name });
+    const existingProfile = await DataService.getProfileById(user.uid);
+    const profile = await DataService.saveProfile({
+      id: user.uid,
+      ...normalizedData,
+      email: user.email || existingProfile?.email || '',
+      created_at: existingProfile?.created_at || user.metadata.creationTime || new Date().toISOString()
+    });
+    setCurrentUser(profile);
+    setGoogleProfile(null);
+  };
+
   const signUpWithEmail = async (
     email: string,
     password: string,
@@ -144,7 +252,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const profileData = {
       name: signupProfile.name.trim(),
       username: createUsername(signupProfile.name),
-      mobile_number: '',
+      mobile_number: signupProfile.mobile_number.trim(),
       date_of_birth: signupProfile.date_of_birth
     };
 
@@ -200,6 +308,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!/^[a-zA-Z0-9_]{3,30}$/.test(normalizedData.username)) {
       throw new Error('Username must be 3 to 30 letters, numbers, or underscores.');
     }
+    if (!await DataService.isUsernameAvailable(normalizedData.username, currentUser.id)) {
+      throw new Error('That username is already taken. Choose another one.');
+    }
     if (normalizedData.mobile_number && !/^[0-9+ -]{8,15}$/.test(normalizedData.mobile_number)) {
       throw new Error('Enter a valid mobile number.');
     }
@@ -215,16 +326,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       DataService.clearActiveUser();
     }
     setCurrentUser(null);
+    setGoogleProfile(null);
   };
 
   return (
     <AuthContext.Provider
       value={{
         currentUser,
+        demoAccounts,
+        googleProfile,
         isFirebase,
         demoAuthEnabled,
         loading,
         signInWithEmail,
+        signInAsDemoAccount,
+        signInWithGoogle,
+        completeGoogleProfile,
         signUpWithEmail,
         updateProfile,
         signOut

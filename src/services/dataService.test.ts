@@ -48,12 +48,45 @@ describe('Spider DataService & Marketplace Logic', () => {
     expect(await DataService.getOffersForRequest('req-1')).toEqual([]);
   });
 
+  it('adds four local demo profiles and requests once without replacing user data', async () => {
+    DataService.ensureLocalDemoData();
+    DataService.ensureLocalDemoData();
+
+    expect(DataService.getLocalProfiles().filter((profile) => profile.id.startsWith('demo-profile-'))).toHaveLength(4);
+    expect(DataService.getLocalDemoProfiles()).toHaveLength(4);
+    const requests = await DataService.getRequests();
+    expect(requests.filter((request) => request.is_demo)).toHaveLength(4);
+    expect(requests.filter((request) => request.is_demo).map((request) => request.requester?.id)).toEqual([
+      'demo-profile-aanya',
+      'demo-profile-kabir',
+      'demo-profile-meera',
+      'demo-profile-arjun'
+    ]);
+    DataService.setLocalActiveUser('demo-profile-meera');
+    expect(DataService.getCurrentUser()?.name).toBe('Meera Nair');
+  });
+
   it('finds local demo accounts by email', async () => {
     const profile = { ...testProfiles[0], email: '  Test@Example.com ' };
     expect(DataService.getLocalProfileByEmail('test@example.com')).toBeNull();
     await DataService.saveProfile(profile);
     expect(DataService.getLocalProfileByEmail('TEST@example.com')?.id).toBe(testProfiles[0].id);
     expect(DataService.getLocalProfileByEmail('unknown@example.com')).toBeNull();
+  });
+
+  it('checks username availability while allowing the current owner to keep their username', async () => {
+    await expect(DataService.isUsernameAvailable('test_helper', 'new-user')).resolves.toBe(false);
+    await expect(DataService.isUsernameAvailable('test_helper', 'test-user-helper')).resolves.toBe(true);
+    await expect(DataService.isUsernameAvailable('available_name', 'new-user')).resolves.toBe(true);
+  });
+
+  it('rejects duplicate usernames and preserves username ownership when editing a profile', async () => {
+    const duplicate = { ...testProfiles[2], username: 'TEST_HELPER' };
+    await expect(DataService.saveProfile(duplicate)).rejects.toThrow('That username is already taken.');
+
+    const updatedProfile = { ...testProfiles[1], name: 'Updated Helper' };
+    await expect(DataService.saveProfile(updatedProfile)).resolves.toMatchObject(updatedProfile);
+    await expect(DataService.isUsernameAvailable('test_helper', testProfiles[1].id)).resolves.toBe(true);
   });
 
   it('rejects incorrect local email passwords', async () => {
@@ -73,12 +106,14 @@ describe('Spider DataService & Marketplace Logic', () => {
     const newRequest = await DataService.createRequest(user!.id, {
       description: 'Need help assembling my standing desk',
       details: 'Have all parts ready in living room',
-      budget_inr: 750
+      budget_inr: 750,
+      connection_mode: 'in_person'
     });
 
     expect(newRequest.id).toBeDefined();
     expect(newRequest.status).toBe('Open');
     expect(newRequest.budget_inr).toBe(750);
+    expect(newRequest.connection_mode).toBe('in_person');
     expect(newRequest.requester_id).toBe(user!.id);
     expect((await DataService.getRequests()).some((request) => request.id === newRequest.id)).toBe(true);
   });
@@ -88,11 +123,13 @@ describe('Spider DataService & Marketplace Logic', () => {
     const activeAlert = await DataService.createRequest(requester.id, {
       description: 'Need urgent help with a flat tyre',
       details: 'Area / landmark: Indiranagar',
+      connection_mode: 'in_person',
       is_emergency: true,
       expires_at: new Date(Date.now() + 3 * 60 * 1000).toISOString()
     });
 
     expect(activeAlert.is_emergency).toBe(true);
+    expect(activeAlert.connection_mode).toBe('in_person');
     expect(new Date(activeAlert.expires_at!).getTime()).toBeGreaterThan(Date.now());
     expect((await DataService.getRequests()).some((request) => request.id === activeAlert.id)).toBe(true);
 

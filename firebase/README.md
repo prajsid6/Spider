@@ -1,11 +1,11 @@
 # Firebase backend setup
 
-Spider uses Firebase Authentication (email/password), Cloud Firestore, Realtime Database, and Cloud Functions. Firebase web-app values are public client configuration; Firestore and Realtime Database rules protect the data. Never put Razorpay secrets, VAPID private keys, or the Coturn shared secret in a `VITE_` variable.
+Hanuman uses Firebase Authentication (Google and email/password), Cloud Firestore, Realtime Database, and Cloud Functions. Firebase web-app values are public client configuration; Firestore and Realtime Database rules protect the data. Never put Razorpay secrets, VAPID private keys, or the Coturn shared secret in a `VITE_` variable.
 
 ## Create and configure a Firebase project
 
 1. Create a project in the [Firebase Console](https://console.firebase.google.com/) and register a Web app.
-2. Enable **Authentication → Sign-in method → Email/Password** and customize the verification email template. Add local and deployed hostnames under **Authentication → Settings → Authorized domains**.
+2. Enable **Authentication → Sign-in method → Google** and **Email/Password**, and customize the verification email template. Add local and deployed hostnames under **Authentication → Settings → Authorized domains**. New Google users must complete their Hanuman profile with a name, username, mobile number, and date of birth before continuing.
 3. Create a **Cloud Firestore** database and a **Realtime Database** instance. Copy their project/database details.
 4. Copy `.env.example` to `.env` and set the `VITE_FIREBASE_*` values from the Web app config. Use the Realtime Database URL shown in Firebase for `VITE_FIREBASE_DATABASE_URL`. Do not add a trailing path.
 5. Configure `VITE_RAZORPAY_KEY_ID` and the public `VITE_VAPID_PUBLIC_KEY` if enabling those features.
@@ -55,6 +55,8 @@ Cloud Functions deployment and secret management require a Firebase project on t
 
 - `profiles/{uid}` contains the owner's private account fields. Only that authenticated user can read or write it.
 - `publicProfiles/{uid}` contains only name, username, creation time, and optional avatar color.
+- Help requests store a `connection_mode` of `virtual` or `in_person`; the mode is visible to helpers before they submit an offer. Emergency requests default to in-person because they require an area or landmark.
+- `usernameClaims/{username}` reserves each normalized username for one Firebase user. Profile writes create/update the claim and profile atomically; the deployed Firestore rules require the matching claim. Username changes release the previous claim in the same transaction.
 - `requests`, `offers`, and `ratings` hold marketplace documents. The client uses atomic Firestore transactions for offers, accepted-offer transitions, and ratings; deploy the provided rules to limit access.
 - `featureSuggestions` accepts bounded suggestion text and is not readable by clients.
 - Safety push endpoints and approximate locations are written by authenticated Cloud Functions. Client rules do not allow reading the subscriptions collection.

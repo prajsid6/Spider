@@ -10,8 +10,7 @@ import {
   runTransaction,
   setDoc,
   updateDoc,
-  where,
-  writeBatch
+  where
 } from 'firebase/firestore';
 import type { Profile, PublicProfile, HelpRequest, HelpOffer, HelpRating, NewRequestPayload, NewOfferPayload } from '../types';
 
@@ -136,6 +135,37 @@ export const DataService = {
     return getLocal<Profile[]>('profiles', []);
   },
 
+  ensureLocalDemoData(): void {
+    if (firestore) return;
+
+    const now = Date.now();
+    const demoProfiles: Profile[] = [
+      { id: 'demo-profile-aanya', name: 'Aanya Sharma', username: 'aanya_demo', mobile_number: '', date_of_birth: '', created_at: new Date(now - 4 * 86400000).toISOString(), avatar_color: '#A78BFA' },
+      { id: 'demo-profile-kabir', name: 'Kabir Rao', username: 'kabir_demo', mobile_number: '', date_of_birth: '', created_at: new Date(now - 3 * 86400000).toISOString(), avatar_color: '#60A5FA' },
+      { id: 'demo-profile-meera', name: 'Meera Nair', username: 'meera_demo', mobile_number: '', date_of_birth: '', created_at: new Date(now - 2 * 86400000).toISOString(), avatar_color: '#F472B6' },
+      { id: 'demo-profile-arjun', name: 'Arjun Das', username: 'arjun_demo', mobile_number: '', date_of_birth: '', created_at: new Date(now - 86400000).toISOString(), avatar_color: '#34D399' }
+    ];
+    const profiles = this.getLocalProfiles();
+    const existingProfileIds = new Set(profiles.map((profile) => profile.id));
+    const missingProfiles = demoProfiles.filter((profile) => !existingProfileIds.has(profile.id));
+    if (missingProfiles.length > 0) setLocal('profiles', [...profiles, ...missingProfiles]);
+
+    const demoRequests: HelpRequest[] = [
+      { id: 'demo-request-aanya', requester_id: 'demo-profile-aanya', description: 'Looking for help setting up a small balcony garden', details: 'Need advice on beginner-friendly plants and arranging pots in a sunny balcony.', budget_inr: 500, connection_mode: 'virtual', status: 'Open', created_at: new Date(now - 2 * 3600000).toISOString(), is_demo: true },
+      { id: 'demo-request-kabir', requester_id: 'demo-profile-kabir', description: 'Need help carrying a bookshelf to my apartment', details: 'One medium bookshelf, lift available. Meet near the apartment entrance.', budget_inr: 700, connection_mode: 'in_person', status: 'Open', created_at: new Date(now - 5 * 3600000).toISOString(), is_demo: true },
+      { id: 'demo-request-meera', requester_id: 'demo-profile-meera', description: 'Would love a quick review of my resume', details: 'Looking for feedback on clarity and formatting before applying for design roles.', budget_inr: 400, connection_mode: 'virtual', status: 'Open', created_at: new Date(now - 9 * 3600000).toISOString(), is_demo: true },
+      { id: 'demo-request-arjun', requester_id: 'demo-profile-arjun', description: 'Looking for someone to walk my dog this evening', details: 'Friendly indie dog, about 30 minutes around the neighborhood.', budget_inr: 300, connection_mode: 'in_person', status: 'Open', created_at: new Date(now - 13 * 3600000).toISOString(), is_demo: true }
+    ];
+    const requests = getLocal<HelpRequest[]>('requests', []);
+    const existingRequestIds = new Set(requests.map((request) => request.id));
+    const missingRequests = demoRequests.filter((request) => !existingRequestIds.has(request.id));
+    if (missingRequests.length > 0) setLocal('requests', [...missingRequests, ...requests]);
+  },
+
+  getLocalDemoProfiles(): Profile[] {
+    return this.getLocalProfiles().filter((profile) => profile.id.startsWith('demo-profile-'));
+  },
+
   getCurrentUser(): Profile | null {
     const profiles = this.getLocalProfiles();
     const activeId = safeStorage.getItem('spider_active_user_id');
@@ -211,33 +241,93 @@ export const DataService = {
     };
   },
 
+  async isUsernameAvailable(username: string, excludingUserId: string): Promise<boolean> {
+    if (firestore) {
+      const profiles = await getDocs(query(
+        collection(firestore, 'publicProfiles'),
+        where('username', '==', username)
+      ));
+      return profiles.docs.every((profile) => profile.id === excludingUserId);
+    }
+
+    return this.getLocalProfiles().every((profile) =>
+      profile.id === excludingUserId || profile.username.toLowerCase() !== username.toLowerCase()
+    );
+  },
+
   // Save/Create Profile (e.g. from sign up)
   async saveProfile(profile: Profile): Promise<Profile> {
-    if (firestore) {
-      const batch = writeBatch(firestore);
-      batch.set(doc(firestore, 'profiles', profile.id), profile);
+    const database = firestore;
+    if (database) {
+      const username = profile.username.trim().toLowerCase();
+      if (!/^[a-zA-Z0-9_]{3,30}$/.test(username)) {
+        throw new Error('Username must be 3 to 30 letters, numbers, or underscores.');
+      }
+
+      const matchingProfiles = await getDocs(query(
+        collection(database, 'publicProfiles'),
+        where('username', '==', username)
+      ));
+      if (matchingProfiles.docs.some((existingProfile) => existingProfile.id !== profile.id)) {
+        throw new Error('That username is already taken. Choose another one.');
+      }
+
+      const profileRef = doc(database, 'profiles', profile.id);
+      const publicProfileRef = doc(database, 'publicProfiles', profile.id);
+      const usernameClaimRef = doc(database, 'usernameClaims', username);
       const publicProfile: PublicProfile = {
         id: profile.id,
         name: profile.name,
-        username: profile.username,
+        username,
         created_at: profile.created_at,
         ...(profile.avatar_color ? { avatar_color: profile.avatar_color } : {})
       };
-      batch.set(doc(firestore, 'publicProfiles', profile.id), publicProfile);
-      await batch.commit();
-      return profile;
+
+      await runTransaction(database, async (transaction) => {
+        const [claimSnapshot, existingPublicProfile] = await Promise.all([
+          transaction.get(usernameClaimRef),
+          transaction.get(publicProfileRef)
+        ]);
+        if (claimSnapshot.exists() && claimSnapshot.data().uid !== profile.id) {
+          throw new Error('That username is already taken. Choose another one.');
+        }
+
+        const previousUsername = existingPublicProfile.exists()
+          ? String(existingPublicProfile.data().username || '').toLowerCase()
+          : '';
+        const previousClaimRef = previousUsername && previousUsername !== username
+          ? doc(database, 'usernameClaims', previousUsername)
+          : null;
+        const previousClaimSnapshot = previousClaimRef
+          ? await transaction.get(previousClaimRef)
+          : null;
+
+        transaction.set(usernameClaimRef, { uid: profile.id, username });
+        transaction.set(profileRef, { ...profile, username });
+        transaction.set(publicProfileRef, publicProfile);
+        if (previousClaimRef && previousClaimSnapshot?.exists() && previousClaimSnapshot.data().uid === profile.id) {
+          transaction.delete(previousClaimRef);
+        }
+      });
+      return { ...profile, username };
     }
 
     const profiles = this.getLocalProfiles();
+    const username = profile.username.trim().toLowerCase();
+    if (profiles.some((existingProfile) =>
+      existingProfile.id !== profile.id && existingProfile.username.toLowerCase() === username
+    )) {
+      throw new Error('That username is already taken. Choose another one.');
+    }
     const existingIndex = profiles.findIndex(p => p.id === profile.id);
     if (existingIndex >= 0) {
-      profiles[existingIndex] = profile;
+      profiles[existingIndex] = { ...profile, username };
     } else {
-      profiles.push(profile);
+      profiles.push({ ...profile, username });
     }
     setLocal('profiles', profiles);
     safeStorage.setItem('spider_active_user_id', profile.id);
-    return profile;
+    return { ...profile, username };
   },
 
   // Requests
@@ -316,6 +406,7 @@ export const DataService = {
         description: payload.description.trim(),
         details: payload.details?.trim() || null,
         budget_inr: payload.budget_inr ? Number(payload.budget_inr) : null,
+        connection_mode: payload.connection_mode ?? 'virtual',
         status: 'Open',
         created_at: new Date().toISOString(),
         is_emergency: payload.is_emergency ?? false,
@@ -338,6 +429,7 @@ export const DataService = {
       description: payload.description.trim(),
       details: payload.details?.trim() || null,
       budget_inr: payload.budget_inr ? Number(payload.budget_inr) : null,
+      connection_mode: payload.connection_mode ?? 'virtual',
       status: 'Open',
       created_at: new Date().toISOString(),
       is_emergency: payload.is_emergency ?? false,

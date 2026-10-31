@@ -52,6 +52,7 @@ export const EmergencyHelpModal: React.FC<EmergencyHelpModalProps> = ({
       const request = await DataService.createRequest(currentUser.id, {
         description: task,
         details: `Area / landmark: ${location}`,
+        connection_mode: 'in_person',
         is_emergency: true,
         expires_at: new Date(Date.now() + durationMinutes * 60 * 1000).toISOString()
       });
@@ -115,13 +116,13 @@ export const EmergencyHelpModal: React.FC<EmergencyHelpModalProps> = ({
           </span>
           <div>
             <h2 id="emergency-help-title" className="text-xl font-black text-spider-text">Get urgent practical help</h2>
-            <p className="mt-1 text-xs text-spider-muted">Alert the Spider community for a limited time. This is not a normal marketplace post.</p>
+            <p className="mt-1 text-xs text-spider-muted">Alert the Hanuman community for a limited time. This is not a normal marketplace post.</p>
           </div>
         </div>
 
         <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
           <Timer className="mt-0.5 h-4 w-4 shrink-0" />
-          <p>For immediate danger or a medical emergency, contact your local emergency services. This alert reaches people currently using Spider only.</p>
+          <p>For immediate danger or a medical emergency, contact your local emergency services. This alert reaches people currently using Hanuman only.</p>
         </div>
 
         <form onSubmit={handleSubmit} className="mt-5 space-y-4">

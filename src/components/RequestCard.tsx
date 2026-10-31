@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import type { HelpRequest } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { AlertTriangle, IndianRupee, MessageCircle, Clock, CheckCircle2, UserCheck, ArrowRight, Zap, Timer } from 'lucide-react';
+import { AlertTriangle, IndianRupee, MessageCircle, Clock, CheckCircle2, UserCheck, ArrowRight, Zap, Timer, MapPin, Video } from 'lucide-react';
 
 // Format relative date
 const formatTimeAgo = (isoDate: string) => {
@@ -110,6 +110,11 @@ export const RequestCard: React.FC<RequestCardProps> = ({
                 )}
               </p>
               <p className="text-[11px] text-spider-muted">@{request.requester?.username || 'user'}</p>
+              {request.is_demo && (
+                <span className="mt-1 inline-flex rounded-full bg-sky-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-sky-700">
+                  Demo
+                </span>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -131,6 +136,10 @@ export const RequestCard: React.FC<RequestCardProps> = ({
         <h3 className="text-sm font-bold text-spider-text leading-snug line-clamp-2 group-hover:text-spider-primary/90 transition-colors">
           {request.description}
         </h3>
+        <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-spider-soft px-2.5 py-1 text-[10px] font-semibold text-spider-muted">
+          {request.connection_mode === 'in_person' ? <MapPin className="h-3 w-3" /> : <Video className="h-3 w-3" />}
+          {request.connection_mode === 'in_person' ? 'Meet in person' : 'Virtual · In-app call'}
+        </p>
 
         {/* Details preview */}
         {request.details && (

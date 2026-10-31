@@ -29,17 +29,17 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
             {/* Tag pill */}
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-spider-primary/15 border border-spider-primary/25 text-spider-primary text-xs font-bold mb-4">
               <Zap className="w-3.5 h-3.5" />
-              Peer-to-Peer Paid Help Marketplace
+              Hanuman Marketplace
             </div>
 
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight leading-[1.05] text-spider-text">
               Need help?
               <br />
-              <span className="gradient-text">Find your people.</span>
+              <span className="gradient-text">Find your Hanuman.</span>
             </h1>
 
             <p className="mt-4 text-base text-spider-muted leading-relaxed max-w-lg">
-              Post a task, get offers, and call your match in Spider.
+              Post a task, get offers, and connect with your match in Hanuman.
             </p>
 
             <div className="mt-5 grid grid-cols-1 gap-3 text-xs font-semibold text-spider-muted sm:grid-cols-2">

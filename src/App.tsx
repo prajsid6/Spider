@@ -32,7 +32,7 @@ type FilterTab = 'all' | 'open' | 'connected' | 'completed' | 'my-requests' | 'm
 type SortOption = 'newest' | 'budget-high' | 'budget-low' | 'most-offers';
 
 const SpiderApp: React.FC = () => {
-  const { currentUser } = useAuth();
+  const { currentUser, googleProfile, demoAuthEnabled } = useAuth();
   const { showToast } = useToast();
   const [requests, setRequests] = useState<HelpRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -60,6 +60,7 @@ const SpiderApp: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
+      if (demoAuthEnabled) DataService.ensureLocalDemoData();
       const data = await DataService.getRequests();
       setRequests(data);
     } catch (err: any) {
@@ -68,7 +69,7 @@ const SpiderApp: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [demoAuthEnabled]);
 
   const removeExpiredEmergencyRequests = useCallback(() => {
     const now = Date.now();
@@ -442,7 +443,7 @@ const SpiderApp: React.FC = () => {
                 <span aria-hidden="true">🕷</span>
               </div>
               <div>
-                <p className="text-sm font-black tracking-tight text-spider-text">Spider</p>
+                <p className="text-sm font-black tracking-tight text-spider-text">Hanuman</p>
                 <p className="text-[11px] text-spider-muted">A little help goes a long way.</p>
               </div>
             </div>
@@ -484,8 +485,8 @@ const SpiderApp: React.FC = () => {
             </div>
           </div>
           <div className="flex flex-col gap-1 border-t border-spider-border/60 py-2.5 text-[10px] text-spider-muted sm:flex-row sm:items-center sm:justify-between">
-            <p>© {CURRENT_YEAR} Spider Marketplace</p>
-            <p className="font-medium">Made for Indians <span className="mx-1.5 text-spider-border">•</span> Developed by Karnataka Spider</p>
+            <p>© {CURRENT_YEAR} Hanuman Marketplace</p>
+            <p className="font-medium">Made for Indians <span className="mx-1.5 text-spider-border">•</span> Developed by Kannadiga</p>
           </div>
         </div>
       </footer>
@@ -511,7 +512,7 @@ const SpiderApp: React.FC = () => {
           setSearchQuery('');
           setActiveCategory('All');
           setCurrentTab('all');
-          showToast('Urgent alert sent to people currently using Spider.', 'success');
+          showToast('Urgent alert sent to people currently using Hanuman.', 'success');
           loadRequests();
         }}
         onRequireAuth={() => {
@@ -563,7 +564,7 @@ const SpiderApp: React.FC = () => {
       />
 
       <AuthModal
-        isOpen={isAuthOpen}
+        isOpen={isAuthOpen || Boolean(googleProfile)}
         onClose={() => setIsAuthOpen(false)}
       />
 
