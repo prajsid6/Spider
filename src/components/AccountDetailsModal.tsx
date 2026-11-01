@@ -4,6 +4,7 @@ import { AtSign, CalendarDays, Clock3, Phone, UserRound, X, Pencil, Check } from
 import { useAuth } from '../context/AuthContext';
 import type { Profile } from '../types';
 import { ProfileSafetySettings } from './ProfileSafetySettings';
+import { MarketplaceSubscriptionSettings } from './MarketplaceSubscriptionSettings';
 
 interface AccountDetailsModalProps {
   profile: Profile;
@@ -165,6 +166,7 @@ export const AccountDetailsModal: React.FC<AccountDetailsModalProps> = ({ profil
             )}
           </div>
         </form>
+        <MarketplaceSubscriptionSettings />
         <ProfileSafetySettings />
       </section>
     </div>,

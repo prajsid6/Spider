@@ -1,6 +1,6 @@
 # Hanuman
 
-Hanuman is a peer-to-peer paid help marketplace built with React, TypeScript, and Vite.
+Hanuman is a peer-to-peer paid help marketplace built with React, TypeScript, and Vite. Production marketplace access requires a ₹100/month Razorpay subscription for each requester or helper account; emergency-alert extensions use a separate one-time payment.
 
 ## Run locally
 

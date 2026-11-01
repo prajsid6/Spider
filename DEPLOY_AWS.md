@@ -19,7 +19,7 @@ Firebase Web app values and the public Razorpay/VAPID keys are bundled into the 
    - `VITE_FIREBASE_MESSAGING_SENDER_ID`
    - `VITE_FIREBASE_APP_ID`
    - `VITE_FIREBASE_DATABASE_URL`
-   - `VITE_RAZORPAY_KEY_ID` (if payments are enabled)
+   - `VITE_RAZORPAY_KEY_ID` (required for marketplace subscriptions and emergency extensions)
    - `VITE_VAPID_PUBLIC_KEY` (if browser push is enabled)
 3. Add the Amplify hostname and any custom domain to Firebase Authentication's **Authorized domains** and the email-action redirect allowlist.
 4. Configure the SPA rewrite to serve `/index.html` for application routes.
@@ -57,6 +57,7 @@ Deploy server-side Functions to Firebase; do not copy Firebase Admin credentials
 
 - Deploy `firestore.rules`, `firestore.indexes.json`, and `database.rules.json`.
 - Deploy Cloud Functions and configure Razorpay, VAPID, and TURN secrets in Firebase Secret Manager.
+- Create the ₹100/month INR Razorpay plan, set `RAZORPAY_MONTHLY_PLAN_ID` during Functions deployment, and configure the deployed subscription webhook URL with the matching webhook secret. See [`firebase/README.md`](./firebase/README.md).
 - Use a custom SMTP provider for Firebase email authentication.
 - Verify public Firestore reads do not expose private profiles, location coordinates, push endpoints, or payment records.
 - Existing backend data and authentication accounts are not automatically copied. Follow the migration notes in [`firebase/README.md`](./firebase/README.md) before retiring the old backend.

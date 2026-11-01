@@ -28,9 +28,24 @@ interface RazorpayCheckoutInstance {
   open: () => void;
 }
 
+interface RazorpaySubscriptionCheckoutOptions {
+  key: string;
+  subscription_id: string;
+  name: string;
+  description: string;
+  handler: (response: {
+    razorpay_payment_id: string;
+    razorpay_subscription_id: string;
+    razorpay_signature: string;
+  }) => void | Promise<void>;
+  modal: { ondismiss: () => void };
+}
+
 declare global {
   interface Window {
-    Razorpay?: new (options: RazorpayCheckoutOptions) => RazorpayCheckoutInstance;
+    Razorpay?: new (
+      options: RazorpayCheckoutOptions | RazorpaySubscriptionCheckoutOptions
+    ) => RazorpayCheckoutInstance;
   }
 }
 
@@ -72,7 +87,7 @@ export const buyEmergencyExtension = async (requestId: string): Promise<void> =>
       name: 'Hanuman',
       description: 'Emergency request extension',
       order_id: order.id,
-      handler: async (response) => {
+      handler: async (response: RazorpayCheckoutResponse) => {
         try {
           const verifyPayment = httpsCallable<RazorpayCheckoutResponse & { requestId: string }, { verified: boolean }>(
             callableFunctions,

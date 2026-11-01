@@ -8,7 +8,7 @@ Hanuman uses Firebase Authentication (email/password), Cloud Firestore, Realtime
 2. Enable **Authentication → Sign-in method → Email/Password** and customize the verification email template. Add local and deployed hostnames under **Authentication → Settings → Authorized domains**.
 3. Create a **Cloud Firestore** database and a **Realtime Database** instance. Copy their project/database details.
 4. Copy `.env.example` to `.env` and set the `VITE_FIREBASE_*` values from the Web app config. Use the Realtime Database URL shown in Firebase for `VITE_FIREBASE_DATABASE_URL`. Do not add a trailing path. For production GitHub Pages, also set `VITE_VAPID_PUBLIC_KEY` in `.env.production.example`; the Pages workflow intentionally omits the placeholder key.
-5. Configure `VITE_RAZORPAY_KEY_ID` and the public `VITE_VAPID_PUBLIC_KEY` if enabling those features.
+5. Configure `VITE_RAZORPAY_KEY_ID` and the public `VITE_VAPID_PUBLIC_KEY` if enabling those features. Marketplace accounts require a recurring ₹100/month Razorpay subscription; emergency-alert extensions remain separate one-time payments.
 6. Install the Firebase CLI, sign in, and select the project:
 
    ```sh
@@ -33,17 +33,20 @@ Cloud Functions deployment and secret management require a Firebase project on t
    ```sh
    firebase functions:secrets:set RAZORPAY_KEY_ID
    firebase functions:secrets:set RAZORPAY_KEY_SECRET
+   firebase functions:secrets:set RAZORPAY_WEBHOOK_SECRET
    firebase functions:secrets:set VAPID_PRIVATE_KEY
    firebase functions:secrets:set TURN_SHARED_SECRET
    ```
 
-   Set the public `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT`, and comma-separated `TURN_URLS` parameters when prompted during deployment. Set `FIREBASE_DATABASE_URL` to the Realtime Database URL so the request-status trigger can mirror authorized call participants.
+   In Razorpay Dashboard, create an active **INR 100 monthly plan** (period Monthly, interval 1). During Functions deployment, set `RAZORPAY_MONTHLY_PLAN_ID` to that plan ID. Functions verify the plan amount and cadence before creating subscriptions. Set the public `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT`, and comma-separated `TURN_URLS` parameters when prompted during deployment. Set `FIREBASE_DATABASE_URL` to the Realtime Database URL so the request-status trigger can mirror authorized call participants.
 
 9. Deploy the database rules, indexes, Realtime Database rules, and functions:
 
    ```sh
    firebase deploy --only firestore,database,functions
    ```
+
+   After deployment, configure a Razorpay webhook in Dashboard using the deployed `razorpaySubscriptionWebhook` Function URL and the same webhook secret. Subscribe to `subscription.authenticated`, `subscription.activated`, `subscription.charged`, `subscription.pending`, `subscription.halted`, `subscription.cancelled`, `subscription.completed`, `subscription.paused`, and `subscription.resumed`. Test with Razorpay test keys and a test-mode ₹100 monthly plan before switching to live keys.
 
    To publish only access rules and indexes after a rules change:
 
@@ -69,6 +72,8 @@ Cloud Functions deployment and secret management require a Firebase project on t
 - Safety push endpoints and approximate locations are written by authenticated Cloud Functions. Client rules do not allow reading the subscriptions collection.
 - Nearby SOS requires the VAPID public key in both the web app (`VITE_VAPID_PUBLIC_KEY`) and Functions (`VAPID_PUBLIC_KEY`), plus the matching `VAPID_PRIVATE_KEY` secret. The push worker is registered relative to the app base path, and notification links open the active SOS request.
 - `payments` is server-only. Functions verify Razorpay order ownership, amount, INR currency, signature, and captured status before extending an emergency request.
+- `marketplaceSubscriptions/{uid}` is written only by Cloud Functions. Each Firebase account requires its own ₹100/month Razorpay subscription to post requests, submit offers, or accept an offer. The webhook signature is verified before subscription status is updated; marketplace rules independently require an active paid-through period. Users can schedule cancellation at the end of their current billing cycle.
+- The monthly subscription replaces marketplace posting fees and per-job platform commissions. It does not collect or split the requester's agreed payment to a helper; any job payment is settled separately by the participants. Emergency alert extensions remain a separate ₹25 one-time Razorpay checkout.
 - Realtime Database `callSignals` carries ephemeral WebRTC signaling. The Firestore trigger writes participant access at `callAccess/{requestId}/{uid}`; Realtime Database rules use that map to allow signaling only for the requester and accepted helper.
 
 Firestore automatically prompts for any composite index missing from the deployed index file; add only reviewed indexes to `firestore.indexes.json`.

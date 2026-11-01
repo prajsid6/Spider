@@ -3,7 +3,7 @@ import { getApps, initializeApp } from 'firebase-admin/app';
 import { getDatabase } from 'firebase-admin/database';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { defineSecret, defineString } from 'firebase-functions/params';
-import { HttpsError, onCall } from 'firebase-functions/v2/https';
+import { HttpsError, onCall, onRequest } from 'firebase-functions/v2/https';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { geohashForLocation, geohashQueryBounds, distanceBetween } from 'geofire-common';
 import webPush from 'web-push';
@@ -13,75 +13,114 @@ initializeApp();
 const db = getFirestore();
 const razorpayKeyId = defineSecret('RAZORPAY_KEY_ID');
 const razorpayKeySecret = defineSecret('RAZORPAY_KEY_SECRET');
+const razorpayWebhookSecret = defineSecret('RAZORPAY_WEBHOOK_SECRET');
+const razorpayMonthlyPlanId = defineString('RAZORPAY_MONTHLY_PLAN_ID', { default: '' });
 const turnSharedSecret = defineSecret('TURN_SHARED_SECRET');
 const vapidPrivateKey = defineSecret('VAPID_PRIVATE_KEY');
 const vapidPublicKey = defineString('VAPID_PUBLIC_KEY');
 const vapidSubject = defineString('VAPID_SUBJECT', { default: 'mailto:admin@example.com' });
 const turnUrls = defineString('TURN_URLS', { default: '' });
 const firebaseDatabaseURL = defineString('FIREBASE_DATABASE_URL', { default: '' });
-const MARKETPLACE_POST_FEE_PAISE = 200;
-const URGENT_ALERT_FEE_PAISE: Record<number, number> = {
-  10: 1000,
-  20: 2000,
-  30: 3000
-};
 const SOS_CONTRIBUTION_PAISE = new Set([1000, 2500, 5000]);
-const EMERGENCY_EXTENSION_PAISE = 500;
+const MARKETPLACE_SUBSCRIPTION_PAISE = 10000;
+const MARKETPLACE_SUBSCRIPTION_CYCLES = 1200;
 
-interface MarketplacePostDraft {
-  description: string;
-  details: string | null;
-  locality?: string;
-  budget_inr: number | null;
-  connection_mode: 'virtual' | 'in_person';
-  is_emergency: boolean;
-  duration_minutes: number | null;
+interface RazorpaySubscription {
+  id: string;
+  plan_id: string;
+  status: string;
+  current_end?: number | null;
+  has_scheduled_changes?: boolean;
 }
 
-const getMarketplacePostDraft = (value: unknown, durationMinutes: unknown): MarketplacePostDraft => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new HttpsError('invalid-argument', 'A help request is required.');
-  }
-  const input = value as Record<string, unknown>;
-  const description = typeof input.description === 'string' ? input.description.trim() : '';
-  const details = typeof input.details === 'string' ? input.details.trim() : '';
-  const locality = typeof input.locality === 'string' ? input.locality.trim() : '';
-  const connectionMode = input.connection_mode;
-  const isEmergency = input.is_emergency === true;
-  const budget = input.budget_inr;
-  if (
-    description.length < 5 || description.length > 1000 ||
-    details.length > 5000 ||
-    (locality && locality.length > 80) ||
-    !['virtual', 'in_person'].includes(String(connectionMode)) ||
-    (connectionMode === 'in_person' && !locality) ||
-    (budget !== undefined && budget !== null && (
-      typeof budget !== 'number' || !Number.isFinite(budget) || budget < 0
-    ))
-  ) throw new HttpsError('invalid-argument', 'The help request details are invalid.');
+interface MarketplaceSubscriptionStatus {
+  active: boolean;
+  status: string;
+  currentPeriodEnd: number | null;
+  cancelAtPeriodEnd: boolean;
+}
 
-  if (isEmergency && (
-    !Number.isInteger(durationMinutes) ||
-    !Object.hasOwn(URGENT_ALERT_FEE_PAISE, Number(durationMinutes))
-  )) throw new HttpsError('invalid-argument', 'Choose an urgent alert duration of 10, 20, or 30 minutes.');
-  if (!isEmergency && durationMinutes !== null && durationMinutes !== undefined) {
-    throw new HttpsError('invalid-argument', 'Regular requests cannot include an urgent alert duration.');
-  }
+const getRazorpayAuthorization = (): string =>
+  `Basic ${Buffer.from(`${razorpayKeyId.value()}:${razorpayKeySecret.value()}`).toString('base64')}`;
 
-  return {
-    description,
-    details: details || null,
-    ...(locality ? { locality } : {}),
-    budget_inr: typeof budget === 'number' ? budget : null,
-    connection_mode: connectionMode as 'virtual' | 'in_person',
-    is_emergency: isEmergency,
-    duration_minutes: isEmergency ? Number(durationMinutes) : null
-  };
+const isMarketplaceSubscriptionActive = (
+  status: string,
+  currentPeriodEnd: number | null,
+  cancelAtPeriodEnd = false
+): boolean => {
+  const hasPaidTimeRemaining = currentPeriodEnd !== null && currentPeriodEnd * 1000 > Date.now();
+  return hasPaidTimeRemaining && (
+    ['active', 'pending', 'halted', 'paused'].includes(status) ||
+    (status === 'cancelled' && cancelAtPeriodEnd)
+  );
 };
 
-const getMarketplacePostAmount = (draft: MarketplacePostDraft): number =>
-  MARKETPLACE_POST_FEE_PAISE +
-  (draft.is_emergency ? URGENT_ALERT_FEE_PAISE[draft.duration_minutes as number] : 0);
+const fetchRazorpaySubscription = async (subscriptionId: string): Promise<RazorpaySubscription> => {
+  const response = await fetch(`https://api.razorpay.com/v1/subscriptions/${encodeURIComponent(subscriptionId)}`, {
+    headers: { Authorization: getRazorpayAuthorization() }
+  });
+  if (!response.ok) throw new HttpsError('internal', 'Could not confirm the Razorpay subscription status.');
+  return await response.json() as RazorpaySubscription;
+};
+
+const syncMarketplaceSubscription = async (
+  uid: string,
+  subscription: RazorpaySubscription,
+  cancelAtPeriodEnd = false
+): Promise<MarketplaceSubscriptionStatus> => {
+  if (subscription.plan_id !== razorpayMonthlyPlanId.value()) {
+    throw new HttpsError('failed-precondition', 'The subscription is not for the Hanuman monthly plan.');
+  }
+  const currentPeriodEnd = Number.isInteger(subscription.current_end) && Number(subscription.current_end) > 0
+    ? Number(subscription.current_end)
+    : null;
+  const active = isMarketplaceSubscriptionActive(subscription.status, currentPeriodEnd, cancelAtPeriodEnd);
+  const statusRef = db.collection('marketplaceSubscriptions').doc(uid);
+  const ownerRef = db.collection('razorpaySubscriptionOwners').doc(subscription.id);
+  await db.runTransaction(async (transaction) => {
+    const ownerSnapshot = await transaction.get(ownerRef);
+    if (ownerSnapshot.exists && ownerSnapshot.data()?.user_id !== uid) {
+      throw new HttpsError('permission-denied', 'This subscription belongs to a different account.');
+    }
+    transaction.set(ownerRef, {
+      user_id: uid,
+      plan_id: subscription.plan_id,
+      updated_at: FieldValue.serverTimestamp()
+    }, { merge: true });
+    transaction.set(statusRef, {
+      subscription_id: subscription.id,
+      status: subscription.status,
+      is_active: active,
+      current_period_end: currentPeriodEnd
+        ? new Date(currentPeriodEnd * 1000)
+        : null,
+      cancel_at_period_end: cancelAtPeriodEnd,
+      updated_at: FieldValue.serverTimestamp()
+    }, { merge: true });
+  });
+  return { active, status: subscription.status, currentPeriodEnd, cancelAtPeriodEnd };
+};
+
+const verifyMarketplacePlan = async (): Promise<void> => {
+  const planId = razorpayMonthlyPlanId.value();
+  if (!/^plan_[a-zA-Z0-9]{14}$/.test(planId)) {
+    throw new HttpsError('failed-precondition', 'Set RAZORPAY_MONTHLY_PLAN_ID to the configured monthly Razorpay plan.');
+  }
+  const response = await fetch(`https://api.razorpay.com/v1/plans/${encodeURIComponent(planId)}`, {
+    headers: { Authorization: getRazorpayAuthorization() }
+  });
+  if (!response.ok) throw new HttpsError('failed-precondition', 'Could not verify the configured Razorpay subscription plan.');
+  const plan = await response.json() as {
+    id: string; period: string; interval: number; item?: { amount?: number; currency?: string };
+  };
+  if (
+    plan.id !== planId ||
+    plan.period !== 'monthly' ||
+    plan.interval !== 1 ||
+    plan.item?.amount !== MARKETPLACE_SUBSCRIPTION_PAISE ||
+    plan.item?.currency !== 'INR'
+  ) throw new HttpsError('failed-precondition', 'The Razorpay plan must be ₹100 INR, billed monthly.');
+};
 
 const verifyCapturedRazorpayPayment = async (
   orderId: string,
@@ -316,111 +355,6 @@ export const safetyAlert = onCall({ secrets: [vapidPrivateKey] }, async (request
   throw new HttpsError('invalid-argument', 'Unknown safety alert operation.');
 });
 
-export const createMarketplacePostOrder = onCall({
-  secrets: [razorpayKeyId, razorpayKeySecret]
-}, async (request) => {
-  const uid = requireAuth(request.auth?.uid);
-  const draft = getMarketplacePostDraft(request.data?.draft, request.data?.durationMinutes);
-  const amount = getMarketplacePostAmount(draft);
-  const requestId = db.collection('requests').doc().id;
-  const order = await createRazorpayOrder(amount, `post_${randomUUID().replace(/-/g, '').slice(0, 32)}`);
-  if (order.amount !== amount || order.currency !== 'INR') {
-    throw new HttpsError('internal', 'Razorpay returned an unexpected order amount.');
-  }
-  await db.collection('payments').doc(order.id).set({
-    order_id: order.id,
-    request_id: requestId,
-    user_id: uid,
-    type: 'marketplace_post',
-    draft,
-    amount,
-    currency: 'INR',
-    status: 'created',
-    created_at: FieldValue.serverTimestamp()
-  });
-  return { id: order.id, amount, currency: 'INR', requestId };
-});
-
-export const verifyMarketplacePostPayment = onCall({
-  secrets: [razorpayKeyId, razorpayKeySecret]
-}, async (request) => {
-  const uid = requireAuth(request.auth?.uid);
-  const { orderId, paymentId, signature } = request.data as Record<string, unknown>;
-  if (![orderId, paymentId, signature].every((value) => typeof value === 'string')) {
-    throw new HttpsError('invalid-argument', 'Payment verification fields are required.');
-  }
-  const paymentRef = db.collection('payments').doc(orderId as string);
-  const paymentSnapshot = await paymentRef.get();
-  const paymentData = paymentSnapshot.data();
-  if (!paymentSnapshot.exists || !paymentData || paymentData.type !== 'marketplace_post') {
-    throw new HttpsError('not-found', 'Marketplace payment order was not found.');
-  }
-  if (paymentData.user_id !== uid || paymentData.order_id !== orderId) {
-    throw new HttpsError('permission-denied', 'Payment order does not belong to this account.');
-  }
-  const draft = getMarketplacePostDraft(paymentData.draft, paymentData.draft?.duration_minutes);
-  const expectedAmount = getMarketplacePostAmount(draft);
-  if (paymentData.amount !== expectedAmount || paymentData.currency !== 'INR') {
-    throw new HttpsError('failed-precondition', 'Payment order has an invalid amount.');
-  }
-  const capturedPayment = await verifyCapturedRazorpayPayment(
-    orderId as string,
-    paymentId as string,
-    signature as string
-  );
-  if (capturedPayment.amount !== expectedAmount) {
-    throw new HttpsError('failed-precondition', 'Payment is not captured for the expected amount.');
-  }
-
-  const requestId = paymentData.request_id;
-  if (typeof requestId !== 'string') throw new HttpsError('failed-precondition', 'Payment order has no request ID.');
-  const requestRef = db.collection('requests').doc(requestId);
-  const profileSnapshot = await db.collection('publicProfiles').doc(uid).get();
-  if (!profileSnapshot.exists) throw new HttpsError('failed-precondition', 'Your profile is missing.');
-  const now = Date.now();
-  const newRequest = {
-    id: requestId,
-    requester_id: uid,
-    ...(draft.locality ? { locality: draft.locality } : {}),
-    description: draft.description,
-    details: draft.details,
-    budget_inr: draft.budget_inr,
-    connection_mode: draft.connection_mode,
-    status: 'Open',
-    created_at: new Date(now).toISOString(),
-    is_emergency: draft.is_emergency,
-    expires_at: draft.is_emergency
-      ? new Date(now + (draft.duration_minutes as number) * 60 * 1000).toISOString()
-      : null,
-    offers_count: 0,
-    requester: profileSnapshot.data()
-  };
-
-  const savedRequest = await db.runTransaction(async (transaction) => {
-    const storedPaymentSnapshot = await transaction.get(paymentRef);
-    const storedPayment = storedPaymentSnapshot.data();
-    if (!storedPayment || storedPayment.user_id !== uid || storedPayment.type !== 'marketplace_post') {
-      throw new HttpsError('permission-denied', 'Marketplace payment order is invalid.');
-    }
-    if (storedPayment.status === 'paid') {
-      const existingRequest = await transaction.get(requestRef);
-      if (!existingRequest.exists) throw new HttpsError('not-found', 'The paid request could not be found.');
-      return existingRequest.data();
-    }
-    if (storedPayment.status !== 'created') {
-      throw new HttpsError('already-exists', 'This payment order has already been used.');
-    }
-    transaction.create(requestRef, newRequest);
-    transaction.update(paymentRef, {
-      status: 'paid',
-      payment_id: paymentId,
-      paid_at: FieldValue.serverTimestamp()
-    });
-    return newRequest;
-  });
-  return { verified: true, request: savedRequest };
-});
-
 export const createSosContributionOrder = onCall({
   secrets: [razorpayKeyId, razorpayKeySecret]
 }, async (request) => {
@@ -606,6 +540,212 @@ export const verifyEmergencyExtensionPayment = onCall({
     transaction.update(paymentRef, { status: 'paid', payment_id: paymentId, paid_at: FieldValue.serverTimestamp() });
   });
   return { verified: true };
+});
+
+export const createMarketplaceSubscription = onCall({
+  secrets: [razorpayKeyId, razorpayKeySecret]
+}, async (request) => {
+  const uid = requireAuth(request.auth?.uid);
+  await verifyMarketplacePlan();
+  const subscriptionRef = db.collection('marketplaceSubscriptions').doc(uid);
+  const existingSnapshot = await subscriptionRef.get();
+  const existing = existingSnapshot.data();
+  if (existing?.subscription_id && typeof existing.subscription_id === 'string') {
+    const currentSubscription = await fetchRazorpaySubscription(existing.subscription_id);
+    if (['created', 'authenticated', 'active', 'pending', 'halted', 'paused'].includes(currentSubscription.status)) {
+      await syncMarketplaceSubscription(
+        uid,
+        currentSubscription,
+        existing.cancel_at_period_end === true
+      );
+      return { subscriptionId: currentSubscription.id, keyId: razorpayKeyId.value() };
+    }
+  }
+
+  const response = await fetch('https://api.razorpay.com/v1/subscriptions', {
+    method: 'POST',
+    headers: {
+      Authorization: getRazorpayAuthorization(),
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      plan_id: razorpayMonthlyPlanId.value(),
+      total_count: MARKETPLACE_SUBSCRIPTION_CYCLES,
+      quantity: 1,
+      customer_notify: true,
+      notes: { firebase_uid: uid, product: 'hanuman_marketplace' }
+    })
+  });
+  if (!response.ok) throw new HttpsError('internal', 'Could not create the monthly Razorpay subscription.');
+  const subscription = await response.json() as RazorpaySubscription;
+  if (!subscription.id || subscription.plan_id !== razorpayMonthlyPlanId.value()) {
+    throw new HttpsError('internal', 'Razorpay returned an invalid subscription.');
+  }
+  await syncMarketplaceSubscription(uid, subscription);
+  return { subscriptionId: subscription.id, keyId: razorpayKeyId.value() };
+});
+
+export const verifyMarketplaceSubscription = onCall({
+  secrets: [razorpayKeyId, razorpayKeySecret]
+}, async (request) => {
+  const uid = requireAuth(request.auth?.uid);
+  const { subscriptionId, paymentId, signature } = request.data as Record<string, unknown>;
+  if (
+    typeof subscriptionId !== 'string' ||
+    typeof paymentId !== 'string' ||
+    typeof signature !== 'string'
+  ) throw new HttpsError('invalid-argument', 'Subscription verification fields are required.');
+
+  const ownerSnapshot = await db.collection('razorpaySubscriptionOwners').doc(subscriptionId).get();
+  const subscriptionSnapshot = await db.collection('marketplaceSubscriptions').doc(uid).get();
+  if (
+    !ownerSnapshot.exists ||
+    ownerSnapshot.data()?.user_id !== uid ||
+    subscriptionSnapshot.data()?.subscription_id !== subscriptionId
+  ) throw new HttpsError('permission-denied', 'Subscription does not belong to this account.');
+
+  const expected = createHmac('sha256', razorpayKeySecret.value())
+    .update(`${paymentId}|${subscriptionId}`)
+    .digest('hex');
+  const actualBytes = Buffer.from(signature, 'hex');
+  const expectedBytes = Buffer.from(expected, 'hex');
+  if (actualBytes.length !== expectedBytes.length || !timingSafeEqual(actualBytes, expectedBytes)) {
+    throw new HttpsError('permission-denied', 'Subscription payment signature is invalid.');
+  }
+
+  const subscription = await fetchRazorpaySubscription(subscriptionId);
+  return await syncMarketplaceSubscription(uid, subscription);
+});
+
+export const getMarketplaceSubscriptionStatus = onCall({
+  secrets: [razorpayKeyId, razorpayKeySecret]
+}, async (request) => {
+  const uid = requireAuth(request.auth?.uid);
+  await verifyMarketplacePlan();
+  const subscriptionRef = db.collection('marketplaceSubscriptions').doc(uid);
+  const snapshot = await subscriptionRef.get();
+  const subscriptionId = snapshot.data()?.subscription_id;
+  if (typeof subscriptionId !== 'string') {
+    return { active: false, status: 'inactive', currentPeriodEnd: null, cancelAtPeriodEnd: false };
+  }
+  const subscription = await fetchRazorpaySubscription(subscriptionId);
+  return await syncMarketplaceSubscription(
+    uid,
+    subscription,
+    snapshot.data()?.cancel_at_period_end === true
+  );
+});
+
+export const cancelMarketplaceSubscription = onCall({
+  secrets: [razorpayKeyId, razorpayKeySecret]
+}, async (request) => {
+  const uid = requireAuth(request.auth?.uid);
+  const subscriptionRef = db.collection('marketplaceSubscriptions').doc(uid);
+  const subscriptionSnapshot = await subscriptionRef.get();
+  const subscriptionId = subscriptionSnapshot.data()?.subscription_id;
+  if (typeof subscriptionId !== 'string') {
+    throw new HttpsError('failed-precondition', 'There is no marketplace subscription to cancel.');
+  }
+  const ownerSnapshot = await db.collection('razorpaySubscriptionOwners').doc(subscriptionId).get();
+  if (!ownerSnapshot.exists || ownerSnapshot.data()?.user_id !== uid) {
+    throw new HttpsError('permission-denied', 'Subscription does not belong to this account.');
+  }
+  const response = await fetch(
+    `https://api.razorpay.com/v1/subscriptions/${encodeURIComponent(subscriptionId)}/cancel`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: getRazorpayAuthorization(),
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ cancel_at_cycle_end: true })
+    }
+  );
+  if (!response.ok) throw new HttpsError('internal', 'Could not schedule subscription cancellation.');
+  const subscription = await response.json() as RazorpaySubscription;
+  const status = await syncMarketplaceSubscription(uid, subscription, true);
+  return status;
+});
+
+export const razorpaySubscriptionWebhook = onRequest({
+  secrets: [razorpayWebhookSecret]
+}, async (request, response) => {
+  if (request.method !== 'POST') {
+    response.status(405).send('Method not allowed.');
+    return;
+  }
+  const signature = request.get('x-razorpay-signature');
+  if (!signature || !request.rawBody) {
+    response.status(400).send('Missing webhook signature or body.');
+    return;
+  }
+  const expected = createHmac('sha256', razorpayWebhookSecret.value())
+    .update(request.rawBody)
+    .digest('hex');
+  const actualBytes = Buffer.from(signature, 'hex');
+  const expectedBytes = Buffer.from(expected, 'hex');
+  if (actualBytes.length !== expectedBytes.length || !timingSafeEqual(actualBytes, expectedBytes)) {
+    response.status(400).send('Invalid webhook signature.');
+    return;
+  }
+
+  const event = request.body as {
+    id?: string;
+    event?: string;
+    created_at?: number;
+    payload?: { subscription?: { entity?: RazorpaySubscription } };
+  };
+  const subscription = event.payload?.subscription?.entity;
+  if (!event.event?.startsWith('subscription.') || !subscription?.id) {
+    response.status(200).send('Ignored.');
+    return;
+  }
+
+  const ownerRef = db.collection('razorpaySubscriptionOwners').doc(subscription.id);
+  const ownerSnapshot = await ownerRef.get();
+  const uid = ownerSnapshot.data()?.user_id;
+  if (typeof uid !== 'string' || subscription.plan_id !== razorpayMonthlyPlanId.value()) {
+    response.status(200).send('Untracked subscription.');
+    return;
+  }
+
+  const eventId = event.id || createHash('sha256').update(request.rawBody).digest('hex');
+  const eventRef = db.collection('razorpaySubscriptionWebhookEvents').doc(eventId);
+  const subscriptionRef = db.collection('marketplaceSubscriptions').doc(uid);
+  const currentPeriodEnd = Number.isInteger(subscription.current_end) && Number(subscription.current_end) > 0
+    ? Number(subscription.current_end)
+    : null;
+  const cancelAtPeriodEnd = subscription.status === 'cancelled';
+  const active = isMarketplaceSubscriptionActive(subscription.status, currentPeriodEnd, cancelAtPeriodEnd);
+  await db.runTransaction(async (transaction) => {
+    const [seenEvent, currentSubscription] = await Promise.all([
+      transaction.get(eventRef),
+      transaction.get(subscriptionRef)
+    ]);
+    if (seenEvent.exists) return;
+    const lastEventAt = Number(currentSubscription.data()?.last_webhook_created_at || 0);
+    const eventCreatedAt = Number(event.created_at || 0);
+    transaction.create(eventRef, {
+      event: event.event,
+      received_at: FieldValue.serverTimestamp()
+    });
+    if (
+      currentSubscription.data()?.subscription_id !== subscription.id ||
+      eventCreatedAt < lastEventAt
+    ) return;
+    transaction.set(subscriptionRef, {
+      subscription_id: subscription.id,
+      status: subscription.status,
+      is_active: active,
+      current_period_end: currentPeriodEnd
+        ? new Date(currentPeriodEnd * 1000)
+        : null,
+      cancel_at_period_end: cancelAtPeriodEnd,
+      last_webhook_created_at: eventCreatedAt,
+      updated_at: FieldValue.serverTimestamp()
+    }, { merge: true });
+  });
+  response.status(200).send('Processed.');
 });
 
 export const getTurnCredentials = onCall({ secrets: [turnSharedSecret] }, async (request) => {

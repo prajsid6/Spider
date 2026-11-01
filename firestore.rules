@@ -17,6 +17,14 @@ service cloud.firestore {
         && getAfter(claimPath).data.username == username;
     }
 
+    function hasActiveMarketplaceSubscription(userId) {
+      let subscriptionPath = /databases/$(database)/documents/marketplaceSubscriptions/$(userId);
+      return exists(subscriptionPath)
+        && get(subscriptionPath).data.is_active == true
+        && get(subscriptionPath).data.current_period_end is timestamp
+        && get(subscriptionPath).data.current_period_end > request.time;
+    }
+
     function canRateParticipant(requestId, raterId, rateeId) {
       let requestPath = /databases/$(database)/documents/requests/$(requestId);
       let offerByRateePath = /databases/$(database)/documents/offers/$(requestId + '_' + rateeId);
@@ -83,6 +91,7 @@ service cloud.firestore {
     match /requests/{requestId} {
       allow read: if true;
       allow create: if signedIn()
+        && hasActiveMarketplaceSubscription(request.auth.uid)
         && request.resource.data.requester_id == request.auth.uid
         && request.resource.data.description is string
         && request.resource.data.description.size() >= 5
@@ -129,9 +138,13 @@ service cloud.firestore {
               (
                 resource.data.status == 'Open'
                 && request.resource.data.status == 'Connected'
+                && hasActiveMarketplaceSubscription(request.auth.uid)
                 && request.resource.data.accepted_offer_id is string
                 && getAfter(/databases/$(database)/documents/offers/$(request.resource.data.accepted_offer_id)).data.status == 'Accepted'
                 && getAfter(/databases/$(database)/documents/offers/$(request.resource.data.accepted_offer_id)).data.request_id == requestId
+                && hasActiveMarketplaceSubscription(
+                  getAfter(/databases/$(database)/documents/offers/$(request.resource.data.accepted_offer_id)).data.helper_id
+                )
               )
               || (
                 resource.data.status == 'Connected'
@@ -147,6 +160,7 @@ service cloud.firestore {
     match /offers/{offerId} {
       allow read: if true;
       allow create: if signedIn()
+        && hasActiveMarketplaceSubscription(request.auth.uid)
         && request.resource.data.helper_id == request.auth.uid
         && offerId == request.resource.data.request_id + '_' + request.auth.uid
         && request.resource.data.id == offerId
@@ -178,6 +192,7 @@ service cloud.firestore {
               request.resource.data.status == 'Declined'
               || (
                 request.resource.data.status == 'Accepted'
+                && hasActiveMarketplaceSubscription(resource.data.helper_id)
                 && getAfter(/databases/$(database)/documents/requests/$(resource.data.request_id)).data.status == 'Connected'
                 && getAfter(/databases/$(database)/documents/requests/$(resource.data.request_id)).data.accepted_offer_id == offerId
               )
@@ -234,6 +249,11 @@ service cloud.firestore {
 
     match /payments/{paymentId} {
       allow read, write: if false;
+    }
+
+    match /marketplaceSubscriptions/{userId} {
+      allow read: if signedIn() && request.auth.uid == userId;
+      allow write: if false;
     }
 
     match /emergencyLocations/{requestId} {

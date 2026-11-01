@@ -18,6 +18,7 @@ import { AuthModal } from './components/AuthModal';
 import { triggerSafetySOS } from './services/safetyAlertService';
 import { FeatureSuggestionModal } from './components/FeatureSuggestionModal';
 import { ReportIssueModal } from './components/ReportIssueModal';
+import { MarketplaceSubscriptionGate } from './components/MarketplaceSubscriptionGate';
 import {
   Plus,
   RefreshCw,
@@ -717,7 +718,9 @@ export default function App() {
   return (
     <ToastProvider>
       <AuthProvider>
-        <SpiderApp />
+        <MarketplaceSubscriptionGate>
+          <SpiderApp />
+        </MarketplaceSubscriptionGate>
       </AuthProvider>
     </ToastProvider>
   );
