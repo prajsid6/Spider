@@ -159,10 +159,12 @@ export const safetyAlert = onCall({ secrets: [vapidPrivateKey] }, async (request
       requester_id: uid,
       description: 'Emergency help requested nearby',
       details: locationAddress,
+      connection_mode: 'in_person',
       status: 'Open',
       created_at: new Date().toISOString(),
       is_emergency: true,
       expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+      offers_count: 0,
       requester: profile.data()
     });
     await db.collection('emergencyLocations').doc(requestRef.id).set({
@@ -183,7 +185,7 @@ export const safetyAlert = onCall({ secrets: [vapidPrivateKey] }, async (request
             JSON.stringify({
               title: 'Nearby SOS request',
               body: `${locationAddress} — open Spider to respond.`,
-              url: `/?request=${requestRef.id}`,
+              url: `?request=${requestRef.id}`,
               latitude,
               longitude
             })

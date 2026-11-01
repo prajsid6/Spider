@@ -94,12 +94,12 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
               </button>
               <button
                 onClick={onTriggerSOS}
-                disabled={!canTriggerSOS || isTriggeringSOS}
-                title="Trigger an SOS to nearby opted-in users"
+                disabled={isTriggeringSOS}
+                title={canTriggerSOS ? 'Trigger an SOS to nearby opted-in users' : 'Sign in to trigger an SOS'}
                 className="flex w-full items-center justify-center gap-2 rounded-xl border border-rose-300 bg-rose-600 py-3 text-sm font-black text-white transition-colors hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <AlertTriangle className="h-4 w-4" />
-                {isTriggeringSOS ? 'Sending SOS...' : 'Trigger SOS'}
+                {isTriggeringSOS ? 'Sending SOS...' : canTriggerSOS ? 'Trigger SOS' : 'Sign in to trigger SOS'}
               </button>
               <p className="text-center text-[11px] text-spider-muted">
                 Notify nearby opted-in people using your saved SOS settings.

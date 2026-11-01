@@ -22,6 +22,9 @@ export const DEFAULT_SAFETY_ALERT_PREFERENCES: SafetyAlertPreferences = {
 
 const PREFERENCES_KEY = 'spider_safety_alert_preferences';
 
+const getSafetyServiceWorkerPath = (): string =>
+  new URL('safety-push-sw.js', new URL(import.meta.env.BASE_URL, window.location.origin)).pathname;
+
 const getLocalPreferences = (): SafetyAlertPreferences => {
   try {
     const saved = localStorage.getItem(PREFERENCES_KEY);
@@ -104,7 +107,7 @@ export const saveSafetyAlertPreferences = async (preferences: SafetyAlertPrefere
 
 export const isSafetyPushEnrolled = async (): Promise<boolean> => {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
-  const registration = await navigator.serviceWorker.getRegistration('/safety-push-sw.js');
+  const registration = await navigator.serviceWorker.getRegistration(getSafetyServiceWorkerPath());
   if (!registration) return false;
   return Boolean(await registration.pushManager.getSubscription());
 };
@@ -118,12 +121,12 @@ export const enableNearbySafetyAlerts = async (): Promise<void> => {
   if (!vapidPublicKey) throw new Error('Set VITE_VAPID_PUBLIC_KEY to the Firebase push VAPID public key.');
   const permission = await Notification.requestPermission();
   if (permission !== 'granted') throw new Error('Allow browser notifications to enable nearby SOS alerts.');
-  const registration = await navigator.serviceWorker.register('/safety-push-sw.js');
-  const subscription = await registration.pushManager.subscribe({
+  const location = await getApproximateLocation();
+  const registration = await navigator.serviceWorker.register(getSafetyServiceWorkerPath());
+  const subscription = await registration.pushManager.getSubscription() || await registration.pushManager.subscribe({
     userVisibleOnly: true,
     applicationServerKey: decodeVapidKey(vapidPublicKey)
   });
-  const location = await getApproximateLocation();
   const result = await callSafetyAlert({
     action: 'subscribe',
     subscription: subscription.toJSON(),
@@ -134,7 +137,7 @@ export const enableNearbySafetyAlerts = async (): Promise<void> => {
 
 export const refreshNearbySafetyLocation = async (): Promise<void> => {
   if (!functions) throw new Error('Nearby SOS alerts require Firebase Cloud Functions to be configured and deployed.');
-  const registration = await navigator.serviceWorker.getRegistration('/safety-push-sw.js');
+  const registration = await navigator.serviceWorker.getRegistration(getSafetyServiceWorkerPath());
   const subscription = await registration?.pushManager.getSubscription();
   if (!subscription) throw new Error('Enable nearby alerts on this browser before refreshing its location.');
   const location = await getApproximateLocation();
@@ -147,7 +150,7 @@ export const refreshNearbySafetyLocation = async (): Promise<void> => {
 };
 
 export const disableNearbySafetyAlerts = async (): Promise<void> => {
-  const registration = await navigator.serviceWorker.getRegistration('/safety-push-sw.js');
+  const registration = await navigator.serviceWorker.getRegistration(getSafetyServiceWorkerPath());
   const subscription = await registration?.pushManager.getSubscription();
   if (!subscription) return;
   if (functions) {

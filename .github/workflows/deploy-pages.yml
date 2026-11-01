@@ -53,6 +53,12 @@ jobs:
               exit 1
             fi
           done
+          vapid_public_key=$(sed -n 's/^VITE_VAPID_PUBLIC_KEY=//p' .env.production.example)
+          if [[ -n "$vapid_public_key" && "$vapid_public_key" != "your-vapid-public-key" ]]; then
+            printf 'VITE_VAPID_PUBLIC_KEY=%s\n' "$vapid_public_key" >> .env.production
+          else
+            echo "::warning::Nearby push SOS is disabled until VITE_VAPID_PUBLIC_KEY is configured in .env.production.example."
+          fi
           npm run build
 
       - name: Upload Pages artifact

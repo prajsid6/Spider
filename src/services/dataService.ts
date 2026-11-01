@@ -363,6 +363,56 @@ export const DataService = {
     return (await this.getRequestPage()).requests;
   },
 
+  async getRequestById(requestId: string): Promise<HelpRequest | null> {
+    if (firestore) {
+      const requestSnapshot = await getDoc(doc(firestore, 'requests', requestId));
+      if (!requestSnapshot.exists()) return null;
+      const request = { ...requestSnapshot.data(), id: requestSnapshot.id } as HelpRequest;
+      if (
+        request.is_emergency &&
+        request.status === 'Open' &&
+        request.expires_at &&
+        new Date(request.expires_at).getTime() <= Date.now()
+      ) return null;
+      const requester = request.requester || await this.getPublicProfile(request.requester_id);
+      const acceptedOfferSnapshot = request.accepted_offer_id
+        ? await getDoc(doc(firestore, 'offers', request.accepted_offer_id))
+        : null;
+      return {
+        ...request,
+        requester: requester || undefined,
+        offers_count: request.offers_count ?? 0,
+        accepted_offer: acceptedOfferSnapshot?.exists()
+          ? { ...acceptedOfferSnapshot.data(), id: acceptedOfferSnapshot.id } as HelpOffer
+          : undefined
+      };
+    }
+
+    const request = getLocal<HelpRequest[]>('requests', []).find((item) => item.id === requestId);
+    if (!request) return null;
+    if (
+      request.is_emergency &&
+      request.status === 'Open' &&
+      request.expires_at &&
+      new Date(request.expires_at).getTime() <= Date.now()
+    ) return null;
+    const requester = this.getLocalProfiles().find((profile) => profile.id === request.requester_id);
+    const offers = getLocal<HelpOffer[]>('offers', []).filter((offer) => offer.request_id === requestId);
+    const acceptedOffer = offers.find((offer) => offer.status === 'Accepted');
+    return {
+      ...request,
+      requester: requester ? {
+        id: requester.id,
+        name: requester.name,
+        username: requester.username,
+        created_at: requester.created_at,
+        avatar_color: requester.avatar_color
+      } : undefined,
+      offers_count: offers.length,
+      accepted_offer: acceptedOffer
+    };
+  },
+
   async getRequestPage(
     cursor?: RequestPageCursor | null,
     locality?: string,

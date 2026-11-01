@@ -134,6 +134,31 @@ const SpiderApp: React.FC = () => {
   }, [loadRequests]);
 
   useEffect(() => {
+    const url = new URL(window.location.href);
+    const requestId = url.searchParams.get('request');
+    if (!requestId) return;
+    url.searchParams.delete('request');
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    let active = true;
+    void DataService.getRequestById(requestId)
+      .then((request) => {
+        if (!active) return;
+        if (request) {
+          setSelectedRequest(request);
+        } else {
+          showToast('This SOS request is no longer available.', 'info');
+        }
+      })
+      .catch((requestError) => {
+        console.error('Could not open SOS request:', requestError);
+        if (active) showToast('Could not open the SOS request. Refresh and try again.', 'error');
+      });
+    return () => {
+      active = false;
+    };
+  }, [showToast]);
+
+  useEffect(() => {
     const requestIds = requestIdsKey ? requestIdsKey.split('|') : [];
     const unsubscribe = DataService.subscribeToMarketplace(
       () => { void refreshRequests(); },

@@ -120,6 +120,35 @@ describe('Spider DataService & Marketplace Logic', () => {
     expect((await DataService.getRequests()).some((request) => request.id === newRequest.id)).toBe(true);
   });
 
+  it('loads a help request by ID for an SOS notification link', async () => {
+    const request = await DataService.createRequest(testProfiles[0].id, {
+      description: 'Need urgent help with a flat tyre',
+      details: 'Area / landmark: Indiranagar',
+      locality: 'Indiranagar',
+      connection_mode: 'in_person',
+      is_emergency: true,
+      expires_at: new Date(Date.now() + 60_000).toISOString()
+    });
+
+    await expect(DataService.getRequestById(request.id)).resolves.toMatchObject({
+      id: request.id,
+      requester: { id: testProfiles[0].id },
+      connection_mode: 'in_person',
+      is_emergency: true,
+      offers_count: 0
+    });
+  });
+
+  it('does not open expired emergency requests from an SOS notification link', async () => {
+    const request = await DataService.createRequest(testProfiles[0].id, {
+      description: 'Need urgent help with a flat tyre',
+      is_emergency: true,
+      expires_at: new Date(Date.now() - 1000).toISOString()
+    });
+
+    await expect(DataService.getRequestById(request.id)).resolves.toBeNull();
+  });
+
   it('paginates marketplace requests without duplicate or missing entries', async () => {
     const requester = testProfiles[0];
     await Promise.all(Array.from({ length: 25 }, (_, index) =>

@@ -7,7 +7,7 @@ Hanuman uses Firebase Authentication (email/password), Cloud Firestore, Realtime
 1. Create a project in the [Firebase Console](https://console.firebase.google.com/) and register a Web app.
 2. Enable **Authentication → Sign-in method → Email/Password** and customize the verification email template. Add local and deployed hostnames under **Authentication → Settings → Authorized domains**.
 3. Create a **Cloud Firestore** database and a **Realtime Database** instance. Copy their project/database details.
-4. Copy `.env.example` to `.env` and set the `VITE_FIREBASE_*` values from the Web app config. Use the Realtime Database URL shown in Firebase for `VITE_FIREBASE_DATABASE_URL`. Do not add a trailing path.
+4. Copy `.env.example` to `.env` and set the `VITE_FIREBASE_*` values from the Web app config. Use the Realtime Database URL shown in Firebase for `VITE_FIREBASE_DATABASE_URL`. Do not add a trailing path. For production GitHub Pages, also set `VITE_VAPID_PUBLIC_KEY` in `.env.production.example`; the Pages workflow intentionally omits the placeholder key.
 5. Configure `VITE_RAZORPAY_KEY_ID` and the public `VITE_VAPID_PUBLIC_KEY` if enabling those features.
 6. Install the Firebase CLI, sign in, and select the project:
 
@@ -67,6 +67,7 @@ Cloud Functions deployment and secret management require a Firebase project on t
 - `requests`, `offers`, and `ratings` hold marketplace documents. The client uses atomic Firestore transactions for offers, accepted-offer transitions, and ratings; deploy the provided rules to limit access.
 - `featureSuggestions` accepts bounded suggestion text and is not readable by clients.
 - Safety push endpoints and approximate locations are written by authenticated Cloud Functions. Client rules do not allow reading the subscriptions collection.
+- Nearby SOS requires the VAPID public key in both the web app (`VITE_VAPID_PUBLIC_KEY`) and Functions (`VAPID_PUBLIC_KEY`), plus the matching `VAPID_PRIVATE_KEY` secret. The push worker is registered relative to the app base path, and notification links open the active SOS request.
 - `payments` is server-only. Functions verify Razorpay order ownership, amount, INR currency, signature, and captured status before extending an emergency request.
 - Realtime Database `callSignals` carries ephemeral WebRTC signaling. The Firestore trigger writes participant access at `callAccess/{requestId}/{uid}`; Realtime Database rules use that map to allow signaling only for the requester and accepted helper.
 
