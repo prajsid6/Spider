@@ -94,14 +94,14 @@ export const RequestCard: React.FC<RequestCardProps> = ({
 
       <div>
         {/* Header Row */}
-        <div className="flex items-center justify-between gap-2 mb-3">
-          <div className="flex items-center gap-2.5">
+        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-2.5">
             {/* Avatar */}
             <div className="w-9 h-9 rounded-xl bg-spider-border flex items-center justify-center text-spider-text text-xs font-black border border-spider-border/60 group-hover:border-spider-primary/30 transition-colors">
               {request.requester?.name?.charAt(0).toUpperCase() || 'U'}
             </div>
-            <div>
-              <p className="text-xs font-bold text-spider-text group-hover:text-spider-primary transition-colors leading-tight">
+            <div className="min-w-0">
+              <p className="max-w-[180px] truncate text-xs font-bold leading-tight text-spider-text transition-colors group-hover:text-spider-primary sm:max-w-none">
                 {request.requester?.name || 'Anonymous'}
                 {isRequester && (
                   <span className="ml-1.5 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-spider-primary/20 text-spider-primary">
@@ -117,7 +117,7 @@ export const RequestCard: React.FC<RequestCardProps> = ({
               )}
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
             {isLiveEmergency && (
               <span className="flex items-center gap-1 rounded-full bg-rose-100 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-rose-700">
                 <AlertTriangle className="h-3 w-3" />
@@ -156,8 +156,8 @@ export const RequestCard: React.FC<RequestCardProps> = ({
       </div>
 
       {/* Footer */}
-      <div className="mt-4 pt-3.5 border-t border-spider-border/50 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-3">
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-spider-border/50 pt-3.5">
+      <div className="flex min-w-0 items-center gap-3">
           {/* Budget */}
           <div className="flex items-center gap-1 font-black text-spider-primary text-sm">
             <IndianRupee className="w-3.5 h-3.5 stroke-[2.5]" />
@@ -182,7 +182,7 @@ export const RequestCard: React.FC<RequestCardProps> = ({
               onExtendAlert(request);
             }}
             title="Extend this urgent alert by 5 minutes for ₹25"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-rose-700 transition-colors hover:bg-rose-100"
+            className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-rose-300 bg-white px-2.5 py-2 text-[11px] font-bold text-rose-700 transition-colors hover:bg-rose-100 sm:py-1.5"
           >
             <Timer className="h-3.5 w-3.5" />
             Buy 5 more mins · ₹25
@@ -198,7 +198,7 @@ export const RequestCard: React.FC<RequestCardProps> = ({
               onOfferHelp(request);
             }}
             title="Send an offer to help"
-            className="btn-primary py-1.5 px-3.5 text-xs font-bold"
+            className="btn-primary min-h-10 py-2 px-3.5 text-xs font-bold sm:py-1.5"
           >
             <Zap className="w-3.5 h-3.5 stroke-[2.5]" />
             Offer Help

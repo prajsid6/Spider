@@ -15,9 +15,9 @@ import { SafetySOSModal } from './components/SafetySOSModal';
 import { OfferHelpModal } from './components/OfferHelpModal';
 import { RequestDetailModal } from './components/RequestDetailModal';
 import { AuthModal } from './components/AuthModal';
-import { FirebaseConfigModal } from './components/FirebaseConfigModal';
 import { triggerSafetySOS } from './services/safetyAlertService';
 import { FeatureSuggestionModal } from './components/FeatureSuggestionModal';
+import { ReportIssueModal } from './components/ReportIssueModal';
 import {
   Plus,
   RefreshCw,
@@ -56,8 +56,8 @@ const SpiderApp: React.FC = () => {
   const [isEmergencyOpen, setIsEmergencyOpen] = useState(false);
   const [isSafetySOSOpen, setIsSafetySOSOpen] = useState(false);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
-  const [isConfigOpen, setIsConfigOpen] = useState(false);
   const [isSuggestionOpen, setIsSuggestionOpen] = useState(false);
+  const [isIssueReportOpen, setIsIssueReportOpen] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<HelpRequest | null>(null);
   const [offerTargetRequest, setOfferTargetRequest] = useState<HelpRequest | null>(null);
   const [isTriggeringSOS, setIsTriggeringSOS] = useState(false);
@@ -321,7 +321,6 @@ const SpiderApp: React.FC = () => {
       {/* Top Navbar */}
       <Navbar
         onOpenAuthModal={() => setIsAuthOpen(true)}
-        onOpenConfigModal={() => setIsConfigOpen(true)}
       />
 
       {/* Hero Banner */}
@@ -340,7 +339,7 @@ const SpiderApp: React.FC = () => {
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
 
         {liveEmergencyRequests.length > 0 && (
           <section aria-labelledby="live-emergency-heading" className="mb-7 rounded-2xl border border-rose-300 bg-rose-50/70 p-4 sm:p-5">
@@ -371,8 +370,8 @@ const SpiderApp: React.FC = () => {
         )}
 
         {/* Request Filters */}
-        <div className="flex flex-wrap items-end gap-3 pb-6 border-b border-spider-border/60">
-            <label className="block min-w-0 flex-1 text-[10px] font-bold uppercase tracking-wider text-spider-muted sm:min-w-64 sm:max-w-sm">
+        <div className="grid grid-cols-1 gap-3 pb-6 border-b border-spider-border/60 sm:flex sm:flex-wrap sm:items-end sm:gap-3">
+            <label className="block w-full min-w-0 text-[10px] font-bold uppercase tracking-wider text-spider-muted sm:w-auto sm:flex-1 sm:min-w-64 sm:max-w-sm">
               Search requests
               <span className="relative mt-2 block">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-spider-muted" />
@@ -397,25 +396,25 @@ const SpiderApp: React.FC = () => {
                 )}
               </span>
             </label>
-            <label className="block text-[10px] font-bold uppercase tracking-wider text-spider-muted">
+            <label className="block w-full text-[10px] font-bold uppercase tracking-wider text-spider-muted sm:w-auto">
               Bengaluru locality
               <select
                 value={activeLocality}
                 onChange={(event) => setActiveLocality(event.target.value)}
                 title="Filter requests by Bengaluru locality"
-                className="mt-2 block min-w-48 rounded-xl border border-spider-border/80 bg-white px-3 py-2 text-xs font-semibold normal-case tracking-normal text-spider-text shadow-xs focus:border-spider-primary focus:outline-none focus:ring-2 focus:ring-spider-primary/20"
+                className="mt-2 block w-full min-w-0 rounded-xl border border-spider-border/80 bg-white px-3 py-2 text-base font-semibold normal-case tracking-normal text-spider-text shadow-xs focus:border-spider-primary focus:outline-none focus:ring-2 focus:ring-spider-primary/20 sm:w-auto sm:min-w-48 sm:text-xs"
               >
                 <option value="">All Bengaluru localities</option>
                 {BENGALURU_LOCALITIES.map((area) => <option key={area} value={area}>{area}</option>)}
               </select>
             </label>
-            <label className="block text-[10px] font-bold uppercase tracking-wider text-spider-muted">
+            <label className="block w-full text-[10px] font-bold uppercase tracking-wider text-spider-muted sm:w-auto">
               Filter by status
               <select
                 value={currentTab}
                 onChange={(event) => setCurrentTab(event.target.value as FilterTab)}
                 title="Filter requests by status"
-                className="mt-2 block min-w-48 rounded-xl border border-spider-border/80 bg-white px-3 py-2 text-xs font-semibold normal-case tracking-normal text-spider-text shadow-xs focus:border-spider-primary focus:outline-none focus:ring-2 focus:ring-spider-primary/20"
+                className="mt-2 block w-full min-w-0 rounded-xl border border-spider-border/80 bg-white px-3 py-2 text-base font-semibold normal-case tracking-normal text-spider-text shadow-xs focus:border-spider-primary focus:outline-none focus:ring-2 focus:ring-spider-primary/20 sm:w-auto sm:min-w-48 sm:text-xs"
               >
                 <option value="all">Any Status ({requests.length} loaded)</option>
                 <option value="open">Open ({openCount} loaded)</option>
@@ -425,26 +424,26 @@ const SpiderApp: React.FC = () => {
                 {currentUser && <option value="my-offers">My Offers ({myOffersCount} loaded)</option>}
               </select>
             </label>
-            <label className="block text-[10px] font-bold uppercase tracking-wider text-spider-muted">
+            <label className="block w-full text-[10px] font-bold uppercase tracking-wider text-spider-muted sm:w-auto">
               Browse by category
               <select
                 value={activeCategory}
                 onChange={(event) => setActiveCategory(event.target.value)}
                 title="Filter requests by category"
-                className="mt-2 block min-w-48 rounded-xl border border-spider-border/80 bg-white px-3 py-2 text-xs font-semibold normal-case tracking-normal text-spider-text shadow-xs focus:border-spider-primary focus:outline-none focus:ring-2 focus:ring-spider-primary/20"
+                className="mt-2 block w-full min-w-0 rounded-xl border border-spider-border/80 bg-white px-3 py-2 text-base font-semibold normal-case tracking-normal text-spider-text shadow-xs focus:border-spider-primary focus:outline-none focus:ring-2 focus:ring-spider-primary/20 sm:w-auto sm:min-w-48 sm:text-xs"
               >
                 {CATEGORIES.map((category) => (
                   <option key={category} value={category}>{category}</option>
                 ))}
               </select>
             </label>
-            <label className="block text-[10px] font-bold uppercase tracking-wider text-spider-muted">
+            <label className="block w-full text-[10px] font-bold uppercase tracking-wider text-spider-muted sm:w-auto">
               Sort by
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as SortOption)}
                 title="Choose how requests are sorted"
-                className="mt-2 block min-w-48 rounded-xl border border-spider-border/80 bg-white px-3 py-2 text-xs font-semibold normal-case tracking-normal text-spider-text shadow-xs focus:border-spider-primary focus:outline-none focus:ring-2 focus:ring-spider-primary/20"
+                className="mt-2 block w-full min-w-0 rounded-xl border border-spider-border/80 bg-white px-3 py-2 text-base font-semibold normal-case tracking-normal text-spider-text shadow-xs focus:border-spider-primary focus:outline-none focus:ring-2 focus:ring-spider-primary/20 sm:w-auto sm:min-w-48 sm:text-xs"
               >
                 <option value="newest">Newest First</option>
                 <option value="budget-high">Budget: High to Low</option>
@@ -455,7 +454,7 @@ const SpiderApp: React.FC = () => {
             <button
               onClick={loadRequests}
               title="Refresh requests"
-              className="flex h-[34px] items-center gap-2 rounded-xl border border-spider-border/80 bg-white px-3 text-xs font-semibold text-spider-text shadow-xs transition-colors hover:bg-spider-soft hover:text-spider-primary"
+              className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-spider-border/80 bg-white px-3 text-xs font-semibold text-spider-text shadow-xs transition-colors hover:bg-spider-soft hover:text-spider-primary sm:h-[34px] sm:w-auto"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
               Refresh
@@ -589,14 +588,24 @@ const SpiderApp: React.FC = () => {
               </ol>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-spider-border/60 pt-3 md:col-span-2">
-              <button
-                type="button"
-                onClick={() => setIsSuggestionOpen(true)}
-                title="Suggest a feature"
-                className="rounded-lg border border-spider-border bg-white px-3 py-1.5 text-[11px] font-bold text-spider-text shadow-xs transition-all hover:border-spider-primary hover:shadow-sm"
-              >
-                Suggest a feature
-              </button>
+              <div className="flex flex-col items-start gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsSuggestionOpen(true)}
+                  title="Suggest a feature"
+                  className="rounded-lg border border-spider-border bg-white px-3 py-1.5 text-[11px] font-bold text-spider-text shadow-xs transition-all hover:border-spider-primary hover:shadow-sm"
+                >
+                  Suggest a feature
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsIssueReportOpen(true)}
+                  title="Report an issue"
+                  className="rounded-lg border border-spider-border bg-white px-3 py-1.5 text-[11px] font-bold text-spider-text shadow-xs transition-all hover:border-rose-300 hover:shadow-sm"
+                >
+                  Report an issue
+                </button>
+              </div>
               <button
                 type="button"
                 onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
@@ -656,6 +665,11 @@ const SpiderApp: React.FC = () => {
         onClose={() => setIsSuggestionOpen(false)}
       />
 
+      <ReportIssueModal
+        isOpen={isIssueReportOpen}
+        onClose={() => setIsIssueReportOpen(false)}
+      />
+
       <OfferHelpModal
         request={offerTargetRequest}
         isOpen={Boolean(offerTargetRequest)}
@@ -693,15 +707,6 @@ const SpiderApp: React.FC = () => {
       <AuthModal
         isOpen={isAuthOpen}
         onClose={() => setIsAuthOpen(false)}
-      />
-
-      <FirebaseConfigModal
-        isOpen={isConfigOpen}
-        onClose={() => setIsConfigOpen(false)}
-        onReset={() => {
-          showToast('Sample demo data reset', 'info');
-          loadRequests();
-        }}
       />
 
     </div>

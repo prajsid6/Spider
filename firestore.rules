@@ -204,9 +204,23 @@ service cloud.firestore {
     }
 
     match /featureSuggestions/{suggestionId} {
-      allow create: if request.resource.data.suggestion is string
+      allow create: if request.resource.data.keys().hasOnly(['suggestion', 'created_at'])
+        && request.resource.data.suggestion is string
         && request.resource.data.suggestion.size() >= 10
-        && request.resource.data.suggestion.size() <= 2000;
+        && request.resource.data.suggestion.size() <= 2000
+        && request.resource.data.created_at is string;
+      allow read, update, delete: if false;
+    }
+
+    match /issueReports/{reportId} {
+      allow create: if request.resource.data.keys().hasOnly(['title', 'description', 'created_at'])
+        && request.resource.data.title is string
+        && request.resource.data.title.size() >= 5
+        && request.resource.data.title.size() <= 120
+        && request.resource.data.description is string
+        && request.resource.data.description.size() >= 10
+        && request.resource.data.description.size() <= 2000
+        && request.resource.data.created_at is string;
       allow read, update, delete: if false;
     }
 

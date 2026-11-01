@@ -130,3 +130,11 @@ body :not(svg):not(path):not(.gradient-text),
 body :not(svg):not(path):not(.gradient-text)::placeholder {
   color: #000000 !important;
 }
+
+@media (max-width: 639px) {
+  .input-field,
+  input[type="search"],
+  select {
+    font-size: 16px;
+  }
+}

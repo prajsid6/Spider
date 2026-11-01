@@ -76,8 +76,8 @@ const OfferHelpModalInner: React.FC<InnerProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-spider-text/40 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="relative w-full max-w-lg bg-white rounded-3xl shadow-spider-lg border border-spider-border p-6 sm:p-7 animate-in fade-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-spider-text/40 p-4 backdrop-blur-xs sm:items-center">
+      <div className="relative my-auto max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto overscroll-contain rounded-3xl border border-spider-border bg-white p-4 shadow-spider-lg sm:p-7 animate-in fade-in zoom-in-95 duration-200">
         
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-spider-border/60">

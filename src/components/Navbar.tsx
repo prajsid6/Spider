@@ -3,20 +3,17 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { AccountDetailsModal } from './AccountDetailsModal';
 import {
-  ChevronDown, Database,
-  LogOut, Shield, ContactRound
+  ChevronDown, LogOut, Shield, ContactRound
 } from 'lucide-react';
 
 interface NavbarProps {
   onOpenAuthModal: () => void;
-  onOpenConfigModal: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
-  onOpenAuthModal,
-  onOpenConfigModal
+  onOpenAuthModal
 }) => {
-  const { currentUser, isFirebase, signOut } = useAuth();
+  const { currentUser, signOut } = useAuth();
   const { showToast } = useToast();
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const [accountDetailsOpen, setAccountDetailsOpen] = useState(false);
@@ -38,18 +35,6 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Actions */}
           <div className="flex items-center gap-2 shrink-0">
-            {import.meta.env.DEV && (
-              <button
-                onClick={onOpenConfigModal}
-                title="Firebase connection and setup"
-                className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-spider-elevated border border-spider-border text-xs text-spider-muted hover:border-spider-border/60 transition-colors"
-              >
-                <span className={`h-1.5 w-1.5 rounded-full ${isFirebase ? 'bg-emerald-400 shadow-[0_0_6px_#22C55E]' : 'bg-amber-400'}`} />
-                <Database className="h-3.5 w-3.5" />
-                <span>{isFirebase ? 'Firebase' : 'Setup'}</span>
-              </button>
-            )}
-
             {/* User Dropdown */}
             {currentUser ? (
               <div className="relative">

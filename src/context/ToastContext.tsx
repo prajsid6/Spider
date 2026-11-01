@@ -35,7 +35,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     <ToastContext.Provider value={{ showToast }}>
       {children}
       {/* Toast Notification Container */}
-      <div className="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none max-w-sm w-full px-4">
+      <div className="fixed bottom-4 left-0 right-0 z-50 mx-auto flex w-full max-w-sm flex-col gap-2 px-4 pointer-events-none sm:bottom-5 sm:left-auto sm:right-5 sm:mx-0">
         {toasts.map((toast) => {
           let bgClass = 'bg-slate-900 text-white border-slate-700';
           let Icon = Info;
@@ -77,4 +77,3 @@ export const useToast = () => {
   }
   return context;
 };
-

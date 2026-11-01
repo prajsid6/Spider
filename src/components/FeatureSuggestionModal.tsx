@@ -33,12 +33,12 @@ export const FeatureSuggestionModal: React.FC<FeatureSuggestionModalProps> = ({ 
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-black/50 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-black/50 p-4 backdrop-blur-sm sm:items-center">
       <section
         role="dialog"
         aria-modal="true"
         aria-labelledby="feature-suggestion-title"
-        className="relative my-auto w-full max-w-lg rounded-3xl border border-spider-border bg-white p-6 shadow-spider-lg"
+        className="relative my-auto max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto overscroll-contain rounded-3xl border border-spider-border bg-white p-4 shadow-spider-lg sm:p-6"
       >
         <button
           type="button"

@@ -38,12 +38,12 @@ export const SafetySOSModal: React.FC<SafetySOSModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm sm:items-center">
       <section
         role="dialog"
         aria-modal="true"
         aria-labelledby="safety-sos-title"
-        className="relative my-auto w-full max-w-md rounded-3xl border border-rose-200 bg-white p-6 shadow-spider-lg"
+        className="relative my-auto max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-3xl border border-rose-200 bg-white p-4 shadow-spider-lg sm:p-6"
       >
         <button
           type="button"

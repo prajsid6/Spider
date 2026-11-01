@@ -100,12 +100,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-spider-text/40 p-4 backdrop-blur-xs">
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-spider-text/40 p-4 backdrop-blur-xs sm:items-center">
       <section
         role="dialog"
         aria-modal="true"
         aria-labelledby="auth-title"
-        className="relative my-auto w-full max-w-md rounded-3xl border border-spider-border bg-white p-6 shadow-spider-lg sm:p-7"
+        className="relative my-auto max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-3xl border border-spider-border bg-white p-4 shadow-spider-lg sm:p-7"
       >
         <button
           type="button"
