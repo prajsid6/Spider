@@ -5,8 +5,8 @@
     "callSignals": {
       "$requestId": {
         "$offerId": {
-          ".read": "auth != null && root.child('callAccess').child($requestId).child($offerId).child(auth.uid).val() === true",
-          ".write": "auth != null && root.child('callAccess').child($requestId).child($offerId).child(auth.uid).val() === true",
+          ".read": "auth != null && root.child('callAccess').child($requestId).child(auth.uid).val() === true",
+          ".write": "auth != null && root.child('callAccess').child($requestId).child(auth.uid).val() === true",
           ".validate": "newData.hasChildren()",
           "$signalId": {
             ".validate": "newData.hasChildren(['type', 'callId', 'senderId', 'createdAt']) && newData.child('senderId').val() === auth.uid && newData.child('type').val() in ['call-offer', 'call-answer', 'ice-candidate', 'call-hangup', 'call-decline']"

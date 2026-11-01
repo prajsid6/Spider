@@ -45,6 +45,12 @@ Cloud Functions deployment and secret management require a Firebase project on t
    firebase deploy --only firestore,database,functions
    ```
 
+   To publish only access rules and indexes after a rules change:
+
+   ```sh
+   firebase deploy --only firestore:rules,firestore:indexes,database
+   ```
+
 10. Restart Vite after editing `.env`:
 
     ```sh
@@ -62,7 +68,7 @@ Cloud Functions deployment and secret management require a Firebase project on t
 - `featureSuggestions` accepts bounded suggestion text and is not readable by clients.
 - Safety push endpoints and approximate locations are written by authenticated Cloud Functions. Client rules do not allow reading the subscriptions collection.
 - `payments` is server-only. Functions verify Razorpay order ownership, amount, INR currency, signature, and captured status before extending an emergency request.
-- Realtime Database `callSignals` carries ephemeral WebRTC signaling. `callAccess` is written only by a Firestore trigger and rules restrict signaling to the requester and accepted helper.
+- Realtime Database `callSignals` carries ephemeral WebRTC signaling. The Firestore trigger writes participant access at `callAccess/{requestId}/{uid}`; Realtime Database rules use that map to allow signaling only for the requester and accepted helper.
 
 Firestore automatically prompts for any composite index missing from the deployed index file; add only reviewed indexes to `firestore.indexes.json`.
 
