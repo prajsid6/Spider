@@ -32,7 +32,7 @@ type FilterTab = 'all' | 'open' | 'connected' | 'completed' | 'my-requests' | 'm
 type SortOption = 'newest' | 'budget-high' | 'budget-low' | 'most-offers';
 
 const SpiderApp: React.FC = () => {
-  const { currentUser, googleProfile, demoAuthEnabled } = useAuth();
+  const { currentUser, demoAuthEnabled } = useAuth();
   const { showToast } = useToast();
   const [requests, setRequests] = useState<HelpRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -564,7 +564,7 @@ const SpiderApp: React.FC = () => {
       />
 
       <AuthModal
-        isOpen={isAuthOpen || Boolean(googleProfile)}
+        isOpen={isAuthOpen}
         onClose={() => setIsAuthOpen(false)}
       />
 

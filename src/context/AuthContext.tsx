@@ -1,5 +1,5 @@
 import React, { createContext, useEffect, useState } from 'react';
-import { createUserWithEmailAndPassword, GoogleAuthProvider, onAuthStateChanged, sendEmailVerification, signInWithEmailAndPassword, signInWithPopup, signOut as firebaseSignOut, updateProfile as updateFirebaseProfile } from 'firebase/auth';
+import { createUserWithEmailAndPassword, onAuthStateChanged, sendEmailVerification, signInWithEmailAndPassword, signOut as firebaseSignOut, updateProfile as updateFirebaseProfile } from 'firebase/auth';
 import type { Profile } from '../types';
 import { DataService } from '../services/dataService';
 import { auth, firestore, isFirebaseConfigured, setRememberMePreference } from '../lib/firebase';
@@ -13,19 +13,11 @@ export interface SignupProfile {
 interface AuthContextType {
   currentUser: Profile | null;
   demoAccounts: Profile[];
-  googleProfile: Pick<Profile, 'name' | 'username' | 'mobile_number' | 'date_of_birth' | 'email'> | null;
   isFirebase: boolean;
   demoAuthEnabled: boolean;
   loading: boolean;
   signInWithEmail: (email: string, password: string, rememberMe: boolean) => Promise<void>;
   signInAsDemoAccount: (profileId: string) => Promise<void>;
-  signInWithGoogle: (rememberMe: boolean) => Promise<boolean>;
-  completeGoogleProfile: (data: {
-    name: string;
-    username: string;
-    mobile_number: string;
-    date_of_birth: string;
-  }) => Promise<void>;
   signUpWithEmail: (email: string, password: string, profile: SignupProfile, rememberMe: boolean) => Promise<boolean>;
   updateProfile: (data: {
     name: string;
@@ -70,7 +62,6 @@ const createUsername = (name: string): string => {
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<Profile | null>(null);
   const [demoAccounts, setDemoAccounts] = useState<Profile[]>([]);
-  const [googleProfile, setGoogleProfile] = useState<AuthContextType['googleProfile']>(null);
   const [loading, setLoading] = useState(true);
   const isFirebase = isFirebaseConfigured();
   const demoAuthEnabled = import.meta.env.DEV && !isFirebase;
@@ -81,27 +72,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const unsubscribe = onAuthStateChanged(auth, async (user) => {
         if (!user) {
           if (active) setCurrentUser(null);
-          if (active) setGoogleProfile(null);
           if (active) setLoading(false);
           return;
         }
         try {
           const profile = await DataService.getProfileById(user.uid);
-          const isGoogleUser = user.providerData.some((provider) => provider.providerId === 'google.com');
-          const isCompleteGoogleProfile = profile?.name && profile.username && profile.mobile_number && profile.date_of_birth;
-          if (active && isGoogleUser && !isCompleteGoogleProfile) {
-            setCurrentUser(null);
-            setGoogleProfile({
-              name: profile?.name || user.displayName || '',
-              username: profile?.username || '',
-              mobile_number: profile?.mobile_number || '',
-              date_of_birth: profile?.date_of_birth || '',
-              email: profile?.email || user.email || ''
-            });
-          } else {
-            if (active) setCurrentUser(profile);
-            if (active) setGoogleProfile(null);
-          }
+          if (active) setCurrentUser(profile);
         } catch (error) {
           console.error('Failed to load signed-in Firebase profile:', error);
           if (active) setCurrentUser(null);
@@ -171,71 +147,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!profile) throw new Error('That demo account is not available.');
     DataService.setLocalActiveUser(profile.id);
     setCurrentUser(profile);
-  };
-
-  const signInWithGoogle = async (rememberMe: boolean): Promise<boolean> => {
-    if (!auth || !firestore) throw new Error('Google sign-in requires a configured Firebase project.');
-    await setRememberMePreference(rememberMe);
-
-    const { user } = await signInWithPopup(auth, new GoogleAuthProvider());
-    const profile = await DataService.getProfileById(user.uid);
-    const isComplete = profile?.name && profile.username && profile.mobile_number && profile.date_of_birth;
-
-    if (isComplete) {
-      setCurrentUser(profile);
-      setGoogleProfile(null);
-      return true;
-    }
-
-    setCurrentUser(null);
-    setGoogleProfile({
-      name: profile?.name || user.displayName || '',
-      username: profile?.username || '',
-      mobile_number: profile?.mobile_number || '',
-      date_of_birth: profile?.date_of_birth || '',
-      email: profile?.email || user.email || ''
-    });
-    return false;
-  };
-
-  const completeGoogleProfile = async (data: {
-    name: string;
-    username: string;
-    mobile_number: string;
-    date_of_birth: string;
-  }): Promise<void> => {
-    const user = auth?.currentUser;
-    if (!user || !user.providerData.some((provider) => provider.providerId === 'google.com')) {
-      throw new Error('Sign in with Google before completing your profile.');
-    }
-
-    const normalizedData = {
-      ...data,
-      name: data.name.trim(),
-      username: data.username.trim().toLowerCase(),
-      mobile_number: data.mobile_number.trim()
-    };
-    validateProfile(normalizedData);
-    if (!/^[a-zA-Z0-9_]{3,30}$/.test(normalizedData.username)) {
-      throw new Error('Username must be 3 to 30 letters, numbers, or underscores.');
-    }
-    if (!await DataService.isUsernameAvailable(normalizedData.username, user.uid)) {
-      throw new Error('That username is already taken. Choose another one.');
-    }
-    if (!/^[0-9+ -]{8,15}$/.test(normalizedData.mobile_number)) {
-      throw new Error('Enter a valid mobile number.');
-    }
-
-    await updateFirebaseProfile(user, { displayName: normalizedData.name });
-    const existingProfile = await DataService.getProfileById(user.uid);
-    const profile = await DataService.saveProfile({
-      id: user.uid,
-      ...normalizedData,
-      email: user.email || existingProfile?.email || '',
-      created_at: existingProfile?.created_at || user.metadata.creationTime || new Date().toISOString()
-    });
-    setCurrentUser(profile);
-    setGoogleProfile(null);
   };
 
   const signUpWithEmail = async (
@@ -326,7 +237,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       DataService.clearActiveUser();
     }
     setCurrentUser(null);
-    setGoogleProfile(null);
   };
 
   return (
@@ -334,14 +244,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       value={{
         currentUser,
         demoAccounts,
-        googleProfile,
         isFirebase,
         demoAuthEnabled,
         loading,
         signInWithEmail,
         signInAsDemoAccount,
-        signInWithGoogle,
-        completeGoogleProfile,
         signUpWithEmail,
         updateProfile,
         signOut

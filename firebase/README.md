@@ -1,11 +1,11 @@
 # Firebase backend setup
 
-Hanuman uses Firebase Authentication (Google and email/password), Cloud Firestore, Realtime Database, and Cloud Functions. Firebase web-app values are public client configuration; Firestore and Realtime Database rules protect the data. Never put Razorpay secrets, VAPID private keys, or the Coturn shared secret in a `VITE_` variable.
+Hanuman uses Firebase Authentication (email/password), Cloud Firestore, Realtime Database, and Cloud Functions. Firebase web-app values are public client configuration; Firestore and Realtime Database rules protect the data. Never put Razorpay secrets, VAPID private keys, or the Coturn shared secret in a `VITE_` variable.
 
 ## Create and configure a Firebase project
 
 1. Create a project in the [Firebase Console](https://console.firebase.google.com/) and register a Web app.
-2. Enable **Authentication → Sign-in method → Google** and **Email/Password**, and customize the verification email template. Add local and deployed hostnames under **Authentication → Settings → Authorized domains**. New Google users must complete their Hanuman profile with a name, username, mobile number, and date of birth before continuing.
+2. Enable **Authentication → Sign-in method → Email/Password** and customize the verification email template. Add local and deployed hostnames under **Authentication → Settings → Authorized domains**.
 3. Create a **Cloud Firestore** database and a **Realtime Database** instance. Copy their project/database details.
 4. Copy `.env.example` to `.env` and set the `VITE_FIREBASE_*` values from the Web app config. Use the Realtime Database URL shown in Firebase for `VITE_FIREBASE_DATABASE_URL`. Do not add a trailing path.
 5. Configure `VITE_RAZORPAY_KEY_ID` and the public `VITE_VAPID_PUBLIC_KEY` if enabling those features.

@@ -23,9 +23,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     signInWithEmail,
     signInAsDemoAccount,
     signUpWithEmail,
-    signInWithGoogle,
-    completeGoogleProfile,
-    googleProfile,
     demoAccounts,
     demoAuthEnabled
   } = useAuth();
@@ -35,7 +32,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
-  const [username, setUsername] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
@@ -50,16 +46,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setError('');
   }, [defaultMode, isOpen]);
 
-  useEffect(() => {
-    if (!googleProfile) return;
-    setName(googleProfile.name);
-    setUsername(googleProfile.username);
-    setMobileNumber(googleProfile.mobile_number);
-    setDateOfBirth(googleProfile.date_of_birth);
-  }, [googleProfile]);
-
   if (!isOpen) return null;
-  const requiresGoogleProfile = Boolean(googleProfile);
   const inputClassName = 'w-full rounded-xl border border-spider-border bg-white px-3 py-2.5 text-sm text-spider-text placeholder:text-spider-muted/70 focus:border-spider-primary focus:outline-none focus:ring-2 focus:ring-spider-primary/20';
 
   const changeMode = (nextMode: 'signup' | 'signin') => {
@@ -74,15 +61,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setError('');
     setLoading(true);
     try {
-      if (requiresGoogleProfile) {
-        await completeGoogleProfile({
-          name,
-          username,
-          mobile_number: mobileNumber,
-          date_of_birth: dateOfBirth
-        });
-        showToast('Your profile is complete. Welcome to Hanuman!', 'success');
-      } else if (mode === 'signup') {
+      if (mode === 'signup') {
         const signedIn = await signUpWithEmail(email, password, {
           name,
           mobile_number: mobileNumber,
@@ -101,22 +80,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       onClose();
     } catch (authError) {
       setError(authError instanceof Error ? authError.message : 'Could not authenticate.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleGoogleSignIn = async () => {
-    setError('');
-    setLoading(true);
-    try {
-      const profileComplete = await signInWithGoogle(rememberMe);
-      if (profileComplete) {
-        showToast('Signed in with Google.', 'success');
-        onClose();
-      }
-    } catch (authError) {
-      setError(authError instanceof Error ? authError.message : 'Could not sign in with Google.');
     } finally {
       setLoading(false);
     }
@@ -144,33 +107,28 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         aria-labelledby="auth-title"
         className="relative my-auto w-full max-w-md rounded-3xl border border-spider-border bg-white p-6 shadow-spider-lg sm:p-7"
       >
-        {!requiresGoogleProfile && (
-          <button
-            type="button"
-            onClick={onClose}
-            title="Close sign-in"
-            aria-label="Close sign-in"
-            className="absolute right-4 top-4 rounded-full p-1.5 text-spider-muted transition-colors hover:bg-spider-lavender hover:text-spider-text"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={onClose}
+          title="Close sign-in"
+          aria-label="Close sign-in"
+          className="absolute right-4 top-4 rounded-full p-1.5 text-spider-muted transition-colors hover:bg-spider-lavender hover:text-spider-text"
+        >
+          <X className="h-5 w-5" />
+        </button>
 
         <div className="border-b border-spider-border/60 pb-4 pr-8">
           <h2 id="auth-title" className="text-xl font-extrabold text-spider-text">
-            {requiresGoogleProfile ? 'Complete your profile' : mode === 'signup' ? 'Create your account' : 'Sign in to Hanuman'}
+            {mode === 'signup' ? 'Create your account' : 'Sign in to Hanuman'}
           </h2>
           <p className="mt-1 text-xs text-spider-muted">
-            {requiresGoogleProfile
-              ? 'Add these details to finish setting up your account.'
-              : demoAuthEnabled
-                ? 'Local demo access with an email and password.'
-                : 'Sign in securely with Google or your email and password.'}
+            {demoAuthEnabled
+              ? 'Local demo access with an email and password.'
+              : 'Sign in securely with your email and password.'}
           </p>
         </div>
 
-        {!requiresGoogleProfile && (
-          <div className="mt-4 flex rounded-xl border border-spider-border/60 bg-spider-soft p-1" role="tablist" aria-label="Account access">
+        <div className="mt-4 flex rounded-xl border border-spider-border/60 bg-spider-soft p-1" role="tablist" aria-label="Account access">
             <button
               type="button"
               role="tab"
@@ -189,14 +147,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             >
               Sign Up
             </button>
-          </div>
-        )}
-
-        {requiresGoogleProfile && googleProfile && (
-          <p className="mt-4 rounded-xl bg-spider-soft px-3 py-2 text-xs text-spider-muted">
-            Signed in as <span className="font-semibold text-spider-text">{googleProfile.email}</span>
-          </p>
-        )}
+        </div>
 
         {error && (
           <div role="alert" className="mt-4 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
@@ -206,74 +157,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         )}
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-3.5">
-          {requiresGoogleProfile ? (
-            <>
-              <label className="block text-xs font-bold text-spider-text">
-                Full name
-                <span className="relative mt-1.5 block">
-                  <UserRound className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-spider-muted" />
-                  <input type="text" required minLength={2} maxLength={100} autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Your full name" className={`${inputClassName} pl-9`} />
-                </span>
-              </label>
-              <label className="block text-xs font-bold text-spider-text">
-                Username
-                <span className="relative mt-1.5 block">
-                  <AtSign className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-spider-muted" />
-                  <input type="text" required minLength={3} maxLength={30} pattern="[A-Za-z0-9_]+" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value.replace(/^@/, ''))} placeholder="Choose a username" className={`${inputClassName} pl-9`} />
-                </span>
-              </label>
-              <label className="block text-xs font-bold text-spider-text">
-                Mobile number
-                <span className="relative mt-1.5 block">
-                  <Smartphone className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-spider-muted" />
-                  <input
-                    type="tel"
-                    required
-                    minLength={8}
-                    maxLength={15}
-                    pattern="[0-9+ -]{8,15}"
-                    autoComplete="tel"
-                    value={mobileNumber}
-                    onChange={(event) => setMobileNumber(event.target.value)}
-                    placeholder="+91 98765 43210"
-                    className={`${inputClassName} pl-9`}
-                  />
-                </span>
-              </label>
-              <label className="block text-xs font-bold text-spider-text">
-                Date of birth
-                <span className="relative mt-1.5 block">
-                  <CalendarDays className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-spider-muted" />
-                  <input type="date" required max={getMaxDobDate()} autoComplete="bday" value={dateOfBirth} onChange={(event) => setDateOfBirth(event.target.value)} className={`${inputClassName} pl-9`} />
-                </span>
-              </label>
-              <p className="text-[11px] leading-relaxed text-spider-muted">You must be at least 13 years old. Your mobile number is kept private.</p>
-              <button type="submit" disabled={loading} className="w-full btn-primary py-2.5 text-sm font-bold disabled:opacity-50">
-                {loading ? 'Please wait...' : 'Save profile and continue'}
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                disabled={loading || demoAuthEnabled}
-                onClick={handleGoogleSignIn}
-                title={demoAuthEnabled ? 'Configure Firebase to enable Google sign-in.' : undefined}
-                className="flex w-full items-center justify-center gap-2 rounded-xl border border-spider-border bg-white py-2.5 text-sm font-bold text-spider-text transition-colors hover:bg-spider-soft disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <span aria-hidden="true" className="text-base font-extrabold text-[#4285F4]">G</span>
-                Continue with Google
-              </button>
-              {demoAuthEnabled && (
-                <p className="text-center text-[11px] text-spider-muted">
-                  Configure Firebase to enable Google sign-in.
-                </p>
-              )}
-              <div className="flex items-center gap-3 text-[11px] text-spider-muted">
-                <span className="h-px flex-1 bg-spider-border" />
-                or continue with email
-                <span className="h-px flex-1 bg-spider-border" />
-              </div>
+          <>
               {demoAuthEnabled && mode === 'signin' && (
                 <section className="rounded-xl border border-spider-border bg-spider-soft/60 p-3">
                   <div className="mb-2">
@@ -359,16 +243,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <button type="submit" disabled={loading} className="w-full btn-primary py-2.5 text-sm font-bold disabled:opacity-50">
                 {loading ? 'Please wait...' : mode === 'signup' ? 'Create account' : 'Sign in'}
               </button>
-            </>
-          )}
+          </>
         </form>
 
-        {!requiresGoogleProfile && (
-          <div className="mt-4 flex items-center justify-center gap-1.5 border-t border-spider-border/60 pt-4 text-[11px] text-spider-muted">
-            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-            Your email is private; connected users can call by username.
-          </div>
-        )}
+        <div className="mt-4 flex items-center justify-center gap-1.5 border-t border-spider-border/60 pt-4 text-[11px] text-spider-muted">
+          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+          Your email is private; connected users can call by username.
+        </div>
       </section>
     </div>
   );
