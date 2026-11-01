@@ -38,15 +38,17 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Actions */}
           <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={onOpenConfigModal}
-              title="Firebase connection and setup"
-              className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-spider-elevated border border-spider-border text-xs text-spider-muted hover:border-spider-border/60 transition-colors"
-            >
-              <span className={`h-1.5 w-1.5 rounded-full ${isFirebase ? 'bg-emerald-400 shadow-[0_0_6px_#22C55E]' : 'bg-amber-400'}`} />
-              <Database className="h-3.5 w-3.5" />
-              <span>{isFirebase ? 'Firebase' : 'Setup'}</span>
-            </button>
+            {import.meta.env.DEV && (
+              <button
+                onClick={onOpenConfigModal}
+                title="Firebase connection and setup"
+                className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-spider-elevated border border-spider-border text-xs text-spider-muted hover:border-spider-border/60 transition-colors"
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${isFirebase ? 'bg-emerald-400 shadow-[0_0_6px_#22C55E]' : 'bg-amber-400'}`} />
+                <Database className="h-3.5 w-3.5" />
+                <span>{isFirebase ? 'Firebase' : 'Setup'}</span>
+              </button>
+            )}
 
             {/* User Dropdown */}
             {currentUser ? (
