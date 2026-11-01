@@ -119,7 +119,7 @@ export const MarketplaceSubscriptionGate: React.FC<{ children: React.ReactNode }
             <p className="mt-2 text-sm leading-relaxed text-spider-muted">
               {loading
                 ? 'Verifying your Razorpay subscription securely.'
-                : 'Subscribe to use Hanuman as a requester or helper. The same plan covers every marketplace action.'}
+                : 'A subscription is required to post requests, make offers, or accept a match. You can browse the platform for free.'}
             </p>
             {!loading && (
               <>
@@ -160,10 +160,13 @@ export const MarketplaceSubscriptionGate: React.FC<{ children: React.ReactNode }
                   type="button"
                   onClick={() => setBypassedUserId(currentUserId || null)}
                   disabled={checkoutLoading}
-                  className="mt-2 w-full rounded-xl px-4 py-2 text-xs font-semibold text-spider-muted hover:bg-spider-bg disabled:opacity-50"
+                  className="mt-3 w-full rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-extrabold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
                 >
-                  Continue to browse and use safety features
+                  FREE PASS — Explore platform
                 </button>
+                <p className="mt-2 text-center text-[11px] leading-relaxed text-spider-muted">
+                  Browse requests and use safety features for free. A subscription is needed to post, offer, or accept.
+                </p>
                 <button
                   type="button"
                   onClick={() => {
