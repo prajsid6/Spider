@@ -9,58 +9,100 @@ import {
 
 export const MarketplaceSubscriptionGate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { currentUser, demoAuthEnabled, isFirebase, signOut } = useAuth();
-  const [status, setStatus] = useState<MarketplaceSubscriptionStatus | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [subscription, setSubscription] = useState<{
+    userId: string;
+    status: MarketplaceSubscriptionStatus;
+  } | null>(null);
+  const [loadingUserId, setLoadingUserId] = useState<string | null>(null);
+  const [bypassedUserId, setBypassedUserId] = useState<string | null>(null);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  const [feedback, setFeedback] = useState<{ userId: string; error: string; notice: string } | null>(null);
+  const currentUserId = currentUser?.id;
 
   const refreshStatus = useCallback(async () => {
-    setLoading(true);
-    setError('');
+    if (!currentUserId) return;
+    setLoadingUserId(currentUserId);
+    setFeedback({ userId: currentUserId, error: '', notice: '' });
     try {
-      setStatus(await getMarketplaceSubscriptionStatus());
+      setSubscription({ userId: currentUserId, status: await getMarketplaceSubscriptionStatus() });
     } catch (statusError) {
-      setError(statusError instanceof Error ? statusError.message : 'Could not verify your subscription.');
+      setFeedback({
+        userId: currentUserId,
+        error: statusError instanceof Error ? statusError.message : 'Could not verify your subscription.',
+        notice: ''
+      });
     } finally {
-      setLoading(false);
+      setLoadingUserId((activeUserId) => activeUserId === currentUserId ? null : activeUserId);
     }
-  }, []);
+  }, [currentUserId]);
 
   useEffect(() => {
-    setStatus(null);
-    setError('');
-    setNotice('');
-    if (!currentUser || !isFirebase || demoAuthEnabled) return;
-    void refreshStatus();
-  }, [currentUser?.id, demoAuthEnabled, isFirebase, refreshStatus]);
+    if (!currentUserId || !isFirebase || demoAuthEnabled) return;
+    let active = true;
+    void getMarketplaceSubscriptionStatus()
+      .then((status) => {
+        if (active) setSubscription({ userId: currentUserId, status });
+      })
+      .catch((statusError: unknown) => {
+        if (active) {
+          setFeedback({
+            userId: currentUserId,
+            error: statusError instanceof Error ? statusError.message : 'Could not verify your subscription.',
+            notice: ''
+          });
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [currentUserId, demoAuthEnabled, isFirebase]);
 
   const handleSubscribe = async () => {
+    if (!currentUserId) return;
     setCheckoutLoading(true);
-    setError('');
-    setNotice('');
+    setFeedback({ userId: currentUserId, error: '', notice: '' });
     try {
       const checkoutStatus = await buyMarketplaceSubscription();
-      setStatus(checkoutStatus);
+      setSubscription({ userId: currentUserId, status: checkoutStatus });
       if (checkoutStatus.active) {
-        setNotice('Subscription active. You now have access to the marketplace.');
+        setFeedback({
+          userId: currentUserId,
+          error: '',
+          notice: 'Subscription active. You now have access to the marketplace.'
+        });
       } else {
-        setNotice('Razorpay received your authorization. Waiting for the subscription to activate; refresh status in a moment.');
+        setFeedback({
+          userId: currentUserId,
+          error: '',
+          notice: 'Razorpay received your authorization. Waiting for the subscription to activate; refresh status in a moment.'
+        });
       }
     } catch (checkoutError) {
-      setError(checkoutError instanceof Error ? checkoutError.message : 'Could not start the subscription checkout.');
+      setFeedback({
+        userId: currentUserId,
+        error: checkoutError instanceof Error ? checkoutError.message : 'Could not start the subscription checkout.',
+        notice: ''
+      });
     } finally {
       setCheckoutLoading(false);
     }
   };
 
   const requiresSubscription = Boolean(currentUser && isFirebase && !demoAuthEnabled);
-  const subscriptionActive = status?.active === true;
+  const currentStatus = subscription && subscription.userId === currentUserId ? subscription.status : null;
+  const subscriptionActive = currentStatus?.active === true;
+  const loading = Boolean(
+    requiresSubscription &&
+    (loadingUserId === currentUserId || (!currentStatus && !feedback?.error))
+  );
+  const error = feedback && feedback.userId === currentUserId ? feedback.error : '';
+  const notice = feedback && feedback.userId === currentUserId ? feedback.notice : '';
+  const showGate = requiresSubscription && bypassedUserId !== currentUserId && (loading || !subscriptionActive);
 
   return (
     <>
       {children}
-      {requiresSubscription && (loading || !subscriptionActive) && (
+      {showGate && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm">
           <section
             role="dialog"
@@ -90,6 +132,9 @@ export const MarketplaceSubscriptionGate: React.FC<{ children: React.ReactNode }
                     <ShieldCheck className="h-4 w-4 text-emerald-600" />
                     Recurring monthly billing. Cancel any time.
                   </p>
+                  <p className="mt-2 text-[11px] text-spider-muted">
+                    No separate posting fee or per-job platform commission. Task payments are settled separately.
+                  </p>
                 </div>
                 {error && <p role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">{error}</p>}
                 {notice && <p role="status" className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">{notice}</p>}
@@ -105,7 +150,7 @@ export const MarketplaceSubscriptionGate: React.FC<{ children: React.ReactNode }
                 <button
                   type="button"
                   onClick={() => void refreshStatus()}
-                  disabled={checkoutLoading || loading}
+                  disabled={checkoutLoading || Boolean(loadingUserId)}
                   className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-spider-border px-4 py-2.5 text-xs font-bold text-spider-text disabled:opacity-50"
                 >
                   <RefreshCw className="h-3.5 w-3.5" />
@@ -113,9 +158,22 @@ export const MarketplaceSubscriptionGate: React.FC<{ children: React.ReactNode }
                 </button>
                 <button
                   type="button"
+                  onClick={() => setBypassedUserId(currentUserId || null)}
+                  disabled={checkoutLoading}
+                  className="mt-2 w-full rounded-xl px-4 py-2 text-xs font-semibold text-spider-muted hover:bg-spider-bg disabled:opacity-50"
+                >
+                  Continue to browse and use safety features
+                </button>
+                <button
+                  type="button"
                   onClick={() => {
+                    if (!currentUserId) return;
                     void signOut().catch((signOutError: unknown) => {
-                      setError(signOutError instanceof Error ? signOutError.message : 'Could not sign out.');
+                      setFeedback({
+                        userId: currentUserId,
+                        error: signOutError instanceof Error ? signOutError.message : 'Could not sign out.',
+                        notice: ''
+                      });
                     });
                   }}
                   disabled={checkoutLoading}

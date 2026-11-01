@@ -78,9 +78,16 @@ const syncMarketplaceSubscription = async (
   const statusRef = db.collection('marketplaceSubscriptions').doc(uid);
   const ownerRef = db.collection('razorpaySubscriptionOwners').doc(subscription.id);
   await db.runTransaction(async (transaction) => {
-    const ownerSnapshot = await transaction.get(ownerRef);
+    const [ownerSnapshot, statusSnapshot] = await Promise.all([
+      transaction.get(ownerRef),
+      transaction.get(statusRef)
+    ]);
     if (ownerSnapshot.exists && ownerSnapshot.data()?.user_id !== uid) {
       throw new HttpsError('permission-denied', 'This subscription belongs to a different account.');
+    }
+    const currentSubscriptionId = statusSnapshot.data()?.subscription_id;
+    if (typeof currentSubscriptionId === 'string' && currentSubscriptionId !== subscription.id) {
+      throw new HttpsError('aborted', 'A different subscription is already linked to this account.');
     }
     transaction.set(ownerRef, {
       user_id: uid,
@@ -562,27 +569,86 @@ export const createMarketplaceSubscription = onCall({
     }
   }
 
-  const response = await fetch('https://api.razorpay.com/v1/subscriptions', {
-    method: 'POST',
-    headers: {
-      Authorization: getRazorpayAuthorization(),
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      plan_id: razorpayMonthlyPlanId.value(),
-      total_count: MARKETPLACE_SUBSCRIPTION_CYCLES,
-      quantity: 1,
-      customer_notify: true,
-      notes: { firebase_uid: uid, product: 'hanuman_marketplace' }
-    })
+  const lockRef = db.collection('marketplaceSubscriptionCreationLocks').doc(uid);
+  const lockToken = randomUUID();
+  await db.runTransaction(async (transaction) => {
+    const [lockSnapshot, latestSubscription] = await Promise.all([
+      transaction.get(lockRef),
+      transaction.get(subscriptionRef)
+    ]);
+    if (
+      typeof latestSubscription.data()?.subscription_id === 'string' &&
+      ['created', 'authenticated', 'active', 'pending', 'halted', 'paused'].includes(
+        String(latestSubscription.data()?.status)
+      )
+    ) {
+      throw new HttpsError('aborted', 'A subscription was just created. Refresh status and try again.');
+    }
+    if (Number(lockSnapshot.data()?.expires_at || 0) > Date.now()) {
+      throw new HttpsError('aborted', 'Subscription checkout is already being prepared. Wait a moment and retry.');
+    }
+    transaction.set(lockRef, {
+      token: lockToken,
+      expires_at: Date.now() + 10 * 60 * 1000
+    });
   });
-  if (!response.ok) throw new HttpsError('internal', 'Could not create the monthly Razorpay subscription.');
-  const subscription = await response.json() as RazorpaySubscription;
-  if (!subscription.id || subscription.plan_id !== razorpayMonthlyPlanId.value()) {
-    throw new HttpsError('internal', 'Razorpay returned an invalid subscription.');
+
+  try {
+    const response = await fetch('https://api.razorpay.com/v1/subscriptions', {
+      method: 'POST',
+      headers: {
+        Authorization: getRazorpayAuthorization(),
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        plan_id: razorpayMonthlyPlanId.value(),
+        total_count: MARKETPLACE_SUBSCRIPTION_CYCLES,
+        quantity: 1,
+        customer_notify: true,
+        notes: { firebase_uid: uid, product: 'hanuman_marketplace' }
+      })
+    });
+    if (!response.ok) throw new HttpsError('internal', 'Could not create the monthly Razorpay subscription.');
+    const subscription = await response.json() as RazorpaySubscription;
+    if (!subscription.id || subscription.plan_id !== razorpayMonthlyPlanId.value()) {
+      throw new HttpsError('internal', 'Razorpay returned an invalid subscription.');
+    }
+    const currentPeriodEnd = Number.isInteger(subscription.current_end) && Number(subscription.current_end) > 0
+      ? Number(subscription.current_end)
+      : null;
+    await db.runTransaction(async (transaction) => {
+      const currentLock = await transaction.get(lockRef);
+      if (currentLock.data()?.token !== lockToken) {
+        throw new HttpsError('aborted', 'Subscription checkout expired before it could be saved. Refresh status and retry.');
+      }
+      transaction.set(db.collection('razorpaySubscriptionOwners').doc(subscription.id), {
+        user_id: uid,
+        plan_id: subscription.plan_id,
+        updated_at: FieldValue.serverTimestamp()
+      });
+      transaction.set(subscriptionRef, {
+        subscription_id: subscription.id,
+        status: subscription.status,
+        is_active: isMarketplaceSubscriptionActive(subscription.status, currentPeriodEnd),
+        current_period_end: currentPeriodEnd ? new Date(currentPeriodEnd * 1000) : null,
+        cancel_at_period_end: false,
+        last_webhook_created_at: 0,
+        updated_at: FieldValue.serverTimestamp()
+      });
+      transaction.delete(lockRef);
+    });
+    return { subscriptionId: subscription.id, keyId: razorpayKeyId.value() };
+  } catch (error) {
+    try {
+      await db.runTransaction(async (transaction) => {
+        const currentLock = await transaction.get(lockRef);
+        if (currentLock.data()?.token === lockToken) transaction.delete(lockRef);
+      });
+    } catch (cleanupError) {
+      console.error('Could not release marketplace subscription creation lock:', cleanupError);
+    }
+    throw error;
   }
-  await syncMarketplaceSubscription(uid, subscription);
-  return { subscriptionId: subscription.id, keyId: razorpayKeyId.value() };
 });
 
 export const verifyMarketplaceSubscription = onCall({
@@ -621,7 +687,6 @@ export const getMarketplaceSubscriptionStatus = onCall({
   secrets: [razorpayKeyId, razorpayKeySecret]
 }, async (request) => {
   const uid = requireAuth(request.auth?.uid);
-  await verifyMarketplacePlan();
   const subscriptionRef = db.collection('marketplaceSubscriptions').doc(uid);
   const snapshot = await subscriptionRef.get();
   const subscriptionId = snapshot.data()?.subscription_id;
@@ -715,8 +780,6 @@ export const razorpaySubscriptionWebhook = onRequest({
   const currentPeriodEnd = Number.isInteger(subscription.current_end) && Number(subscription.current_end) > 0
     ? Number(subscription.current_end)
     : null;
-  const cancelAtPeriodEnd = subscription.status === 'cancelled';
-  const active = isMarketplaceSubscriptionActive(subscription.status, currentPeriodEnd, cancelAtPeriodEnd);
   await db.runTransaction(async (transaction) => {
     const [seenEvent, currentSubscription] = await Promise.all([
       transaction.get(eventRef),
@@ -725,6 +788,7 @@ export const razorpaySubscriptionWebhook = onRequest({
     if (seenEvent.exists) return;
     const lastEventAt = Number(currentSubscription.data()?.last_webhook_created_at || 0);
     const eventCreatedAt = Number(event.created_at || 0);
+    const cancelAtPeriodEnd = currentSubscription.data()?.cancel_at_period_end === true;
     transaction.create(eventRef, {
       event: event.event,
       received_at: FieldValue.serverTimestamp()
@@ -733,6 +797,11 @@ export const razorpaySubscriptionWebhook = onRequest({
       currentSubscription.data()?.subscription_id !== subscription.id ||
       eventCreatedAt < lastEventAt
     ) return;
+    const active = isMarketplaceSubscriptionActive(
+      subscription.status,
+      currentPeriodEnd,
+      cancelAtPeriodEnd
+    );
     transaction.set(subscriptionRef, {
       subscription_id: subscription.id,
       status: subscription.status,

@@ -8,7 +8,7 @@ Hanuman uses Firebase Authentication (email/password), Cloud Firestore, Realtime
 2. Enable **Authentication → Sign-in method → Email/Password** and customize the verification email template. Add local and deployed hostnames under **Authentication → Settings → Authorized domains**.
 3. Create a **Cloud Firestore** database and a **Realtime Database** instance. Copy their project/database details.
 4. Copy `.env.example` to `.env` and set the `VITE_FIREBASE_*` values from the Web app config. Use the Realtime Database URL shown in Firebase for `VITE_FIREBASE_DATABASE_URL`. Do not add a trailing path. For production GitHub Pages, also set `VITE_VAPID_PUBLIC_KEY` in `.env.production.example`; the Pages workflow intentionally omits the placeholder key.
-5. Configure `VITE_RAZORPAY_KEY_ID` and the public `VITE_VAPID_PUBLIC_KEY` if enabling those features. Marketplace accounts require a recurring ₹100/month Razorpay subscription; emergency-alert extensions remain separate one-time payments.
+5. Configure `VITE_RAZORPAY_KEY_ID` for emergency-alert extensions and the public `VITE_VAPID_PUBLIC_KEY` if enabling browser push. Marketplace subscriptions use the Razorpay server credentials and plan configured in Cloud Functions.
 6. Install the Firebase CLI, sign in, and select the project:
 
    ```sh
@@ -38,7 +38,7 @@ Cloud Functions deployment and secret management require a Firebase project on t
    firebase functions:secrets:set TURN_SHARED_SECRET
    ```
 
-   In Razorpay Dashboard, create an active **INR 100 monthly plan** (period Monthly, interval 1). During Functions deployment, set `RAZORPAY_MONTHLY_PLAN_ID` to that plan ID. Functions verify the plan amount and cadence before creating subscriptions. Set the public `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT`, and comma-separated `TURN_URLS` parameters when prompted during deployment. Set `FIREBASE_DATABASE_URL` to the Realtime Database URL so the request-status trigger can mirror authorized call participants.
+   In Razorpay Dashboard, create an active **INR 100 monthly plan** (period Monthly, interval 1). During Functions deployment, set `RAZORPAY_MONTHLY_PLAN_ID` to that plan ID. Functions verify the plan amount and cadence before creating subscriptions. Razorpay requires a finite cycle count, so subscriptions are created for 1200 monthly cycles (its documented 100-year maximum) and can be cancelled earlier by the user. Set the public `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT`, and comma-separated `TURN_URLS` parameters when prompted during deployment. Set `FIREBASE_DATABASE_URL` to the Realtime Database URL so the request-status trigger can mirror authorized call participants.
 
 9. Deploy the database rules, indexes, Realtime Database rules, and functions:
 

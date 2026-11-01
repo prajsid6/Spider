@@ -19,7 +19,7 @@ Firebase Web app values and the public Razorpay/VAPID keys are bundled into the 
    - `VITE_FIREBASE_MESSAGING_SENDER_ID`
    - `VITE_FIREBASE_APP_ID`
    - `VITE_FIREBASE_DATABASE_URL`
-   - `VITE_RAZORPAY_KEY_ID` (required for marketplace subscriptions and emergency extensions)
+   - `VITE_RAZORPAY_KEY_ID` (required for emergency extensions)
    - `VITE_VAPID_PUBLIC_KEY` (if browser push is enabled)
 3. Add the Amplify hostname and any custom domain to Firebase Authentication's **Authorized domains** and the email-action redirect allowlist.
 4. Configure the SPA rewrite to serve `/index.html` for application routes.

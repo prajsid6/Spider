@@ -42,6 +42,16 @@ export interface OfferPage {
 const REQUEST_PAGE_SIZE = 24;
 const OFFER_PAGE_SIZE = 24;
 
+const rethrowMarketplacePermissionError = (error: unknown, message: string): never => {
+  if (
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    error.code === 'permission-denied'
+  ) throw new Error(message);
+  throw error;
+};
+
 const LEGACY_DEMO_PROFILE_IDS = new Set([
   'user-aarav-1',
   'user-priya-2',
@@ -560,7 +570,14 @@ export const DataService = {
         offers_count: 0,
         requester: requester || undefined
       };
-      await setDoc(requestRef, newRequest);
+      try {
+        await setDoc(requestRef, newRequest);
+      } catch (error) {
+        rethrowMarketplacePermissionError(
+          error,
+          'An active ₹100/month subscription is required to post a request. Activate it from Account details, then try again.'
+        );
+      }
       return newRequest;
     }
 
@@ -822,31 +839,38 @@ export const DataService = {
       const requestRef = doc(firestore, 'requests', payload.request_id);
       const helper = await this.getPublicProfile(helperId);
       const offerRef = doc(firestore, 'offers', `${payload.request_id}_${helperId}`);
-      return runTransaction(firestore, async (transaction) => {
-        const requestSnapshot = await transaction.get(requestRef);
-        const existingOffer = await transaction.get(offerRef);
-        if (!requestSnapshot.exists() || requestSnapshot.data().status !== 'Open') {
-          throw new Error('This request is no longer accepting offers.');
-        }
-        const request = requestSnapshot.data() as HelpRequest;
-        if (request.is_emergency && request.expires_at && new Date(request.expires_at).getTime() <= Date.now()) {
-          throw new Error('This urgent help alert has expired.');
-        }
-        if (existingOffer.exists()) throw new Error('You have already submitted an offer for this request.');
-        const offer: HelpOffer = {
-          id: offerRef.id,
-          request_id: payload.request_id,
-          helper_id: helperId,
-          message: payload.message.trim(),
-          proposed_price_inr: payload.proposed_price_inr ? Number(payload.proposed_price_inr) : null,
-          status: 'Pending',
-          created_at: new Date().toISOString(),
-          helper: helper || undefined
-        };
-        transaction.set(offerRef, offer);
-        transaction.update(requestRef, { offers_count: (request.offers_count ?? 0) + 1 });
-        return offer;
-      });
+      try {
+        return await runTransaction(firestore, async (transaction) => {
+          const requestSnapshot = await transaction.get(requestRef);
+          const existingOffer = await transaction.get(offerRef);
+          if (!requestSnapshot.exists() || requestSnapshot.data().status !== 'Open') {
+            throw new Error('This request is no longer accepting offers.');
+          }
+          const request = requestSnapshot.data() as HelpRequest;
+          if (request.is_emergency && request.expires_at && new Date(request.expires_at).getTime() <= Date.now()) {
+            throw new Error('This urgent help alert has expired.');
+          }
+          if (existingOffer.exists()) throw new Error('You have already submitted an offer for this request.');
+          const offer: HelpOffer = {
+            id: offerRef.id,
+            request_id: payload.request_id,
+            helper_id: helperId,
+            message: payload.message.trim(),
+            proposed_price_inr: payload.proposed_price_inr ? Number(payload.proposed_price_inr) : null,
+            status: 'Pending',
+            created_at: new Date().toISOString(),
+            helper: helper || undefined
+          };
+          transaction.set(offerRef, offer);
+          transaction.update(requestRef, { offers_count: (request.offers_count ?? 0) + 1 });
+          return offer;
+        });
+      } catch (error) {
+        rethrowMarketplacePermissionError(
+          error,
+          'An active ₹100/month subscription is required to submit offers. Activate it from Account details, then try again.'
+        );
+      }
     }
 
     // Local
@@ -899,20 +923,27 @@ export const DataService = {
       const database = firestore;
       const requestRef = doc(database, 'requests', requestId);
       const offerRef = doc(database, 'offers', offerId);
-      await runTransaction(database, async (transaction) => {
-        const [requestSnapshot, offerSnapshot] = await Promise.all([
-          transaction.get(requestRef),
-          transaction.get(offerRef)
-        ]);
-        if (!requestSnapshot.exists() || requestSnapshot.data().status !== 'Open') {
-          throw new Error('This request is no longer open.');
-        }
-        if (!offerSnapshot.exists() || offerSnapshot.data().request_id !== requestId || offerSnapshot.data().status !== 'Pending') {
-          throw new Error('This offer is no longer available.');
-        }
-        transaction.update(offerRef, { status: 'Accepted' });
-        transaction.update(requestRef, { status: 'Connected', accepted_offer_id: offerId });
-      });
+      try {
+        await runTransaction(database, async (transaction) => {
+          const [requestSnapshot, offerSnapshot] = await Promise.all([
+            transaction.get(requestRef),
+            transaction.get(offerRef)
+          ]);
+          if (!requestSnapshot.exists() || requestSnapshot.data().status !== 'Open') {
+            throw new Error('This request is no longer open.');
+          }
+          if (!offerSnapshot.exists() || offerSnapshot.data().request_id !== requestId || offerSnapshot.data().status !== 'Pending') {
+            throw new Error('This offer is no longer available.');
+          }
+          transaction.update(offerRef, { status: 'Accepted' });
+          transaction.update(requestRef, { status: 'Connected', accepted_offer_id: offerId });
+        });
+      } catch (error) {
+        rethrowMarketplacePermissionError(
+          error,
+          'Both requester and helper need an active ₹100/month subscription to accept an offer.'
+        );
+      }
       return;
     }
 
