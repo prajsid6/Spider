@@ -36,6 +36,7 @@ type SortOption = 'newest' | 'budget-high' | 'budget-low' | 'most-offers';
 const SpiderApp: React.FC = () => {
   const { currentUser, demoAuthEnabled } = useAuth();
   const { showToast } = useToast();
+  const currentUserId = currentUser?.id;
   const [requests, setRequests] = useState<HelpRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMoreRequests, setLoadingMoreRequests] = useState(false);
@@ -70,7 +71,7 @@ const SpiderApp: React.FC = () => {
     setRequestCursor(null);
     try {
       if (demoAuthEnabled) DataService.ensureLocalDemoData();
-      const page = await DataService.getRequestPage(null, activeLocality || undefined);
+      const page = await DataService.getRequestPage(null, activeLocality || undefined, currentUserId);
       setRequests(page.requests);
       setHasMoreRequests(page.hasMore);
       setRequestCursor(page.nextCursor);
@@ -80,11 +81,11 @@ const SpiderApp: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [activeLocality, demoAuthEnabled]);
+  }, [activeLocality, currentUserId, demoAuthEnabled]);
 
   const refreshRequests = useCallback(async () => {
     try {
-      const page = await DataService.getRequestPage(null, activeLocality || undefined);
+      const page = await DataService.getRequestPage(null, activeLocality || undefined, currentUserId);
       setRequests((current) => {
         const refreshedIds = new Set(page.requests.map((request) => request.id));
         const retained = current.filter((request) => !refreshedIds.has(request.id));
@@ -95,13 +96,13 @@ const SpiderApp: React.FC = () => {
     } catch (refreshError) {
       console.error('Failed to refresh marketplace requests:', refreshError);
     }
-  }, [activeLocality, requestCursor]);
+  }, [activeLocality, currentUserId, requestCursor]);
 
   const loadMoreRequests = useCallback(async () => {
     if (!requestCursor || loadingMoreRequests) return;
     setLoadingMoreRequests(true);
     try {
-      const page = await DataService.getRequestPage(requestCursor, activeLocality || undefined);
+      const page = await DataService.getRequestPage(requestCursor, activeLocality || undefined, currentUserId);
       setRequests((current) => {
         const existingIds = new Set(current.map((request) => request.id));
         return [...current, ...page.requests.filter((request) => !existingIds.has(request.id))];
@@ -114,7 +115,7 @@ const SpiderApp: React.FC = () => {
     } finally {
       setLoadingMoreRequests(false);
     }
-  }, [activeLocality, loadingMoreRequests, requestCursor, showToast]);
+  }, [activeLocality, currentUserId, loadingMoreRequests, requestCursor, showToast]);
 
   const removeExpiredEmergencyRequests = useCallback(() => {
     const now = Date.now();
@@ -249,11 +250,10 @@ const SpiderApp: React.FC = () => {
     } else if (currentTab === 'my-requests') {
       result = result.filter((r) => r.requester_id === currentUser?.id);
     } else if (currentTab === 'my-offers') {
-      // In demo mode or Firebase, filter where user submitted offer
-      result = result.filter((r) => {
-        // If current user is accepted or offers contain current user
-        return r.accepted_offer?.helper_id === currentUser?.id || r.requester_id !== currentUser?.id;
-      });
+      result = result.filter((request) =>
+        request.user_offer?.helper_id === currentUser?.id ||
+        request.accepted_offer?.helper_id === currentUser?.id
+      );
     }
 
     // Sorting
@@ -282,6 +282,12 @@ const SpiderApp: React.FC = () => {
   const completedCount = requests.filter((r) => r.status === 'Completed').length;
   const myRequestsCount = currentUser
     ? requests.filter((r) => r.requester_id === currentUser.id).length
+    : 0;
+  const myOffersCount = currentUser
+    ? requests.filter((request) =>
+        request.user_offer?.helper_id === currentUser.id ||
+        request.accepted_offer?.helper_id === currentUser.id
+      ).length
     : 0;
 
   return (
@@ -391,6 +397,7 @@ const SpiderApp: React.FC = () => {
                 <option value="connected">Connected ({connectedCount} loaded)</option>
                 <option value="completed">Completed ({completedCount} loaded)</option>
                 {currentUser && <option value="my-requests">My Requests ({myRequestsCount} loaded)</option>}
+                {currentUser && <option value="my-offers">My Offers ({myOffersCount} loaded)</option>}
               </select>
             </label>
             <label className="block text-[10px] font-bold uppercase tracking-wider text-spider-muted">
@@ -433,7 +440,7 @@ const SpiderApp: React.FC = () => {
         {/* Requests Feed */}
         <div className="mt-6">
           <p className="mb-3 text-[11px] text-spider-muted">
-            Showing up to 24 requests at a time. Load older requests to continue browsing.
+            Showing {filteredRequests.length} matches among {requests.length} loaded requests. Search, filters, and sorting apply to loaded requests.
           </p>
           {loading ? (
             <div className="py-20 text-center space-y-3">
@@ -464,7 +471,7 @@ const SpiderApp: React.FC = () => {
                   : 'Be the first to post a help request in your community!'}
               </p>
               <div className="mt-4 flex items-center justify-center gap-2">
-                {(searchQuery || activeCategory !== 'All' || currentTab !== 'all') && (
+                {(searchQuery || activeCategory !== 'All' || currentTab !== 'all' || activeLocality) && (
                   <button
                     onClick={() => {
                       setSearchQuery('');
@@ -628,11 +635,15 @@ const SpiderApp: React.FC = () => {
         request={offerTargetRequest}
         isOpen={Boolean(offerTargetRequest)}
         onClose={() => setOfferTargetRequest(null)}
-        onSuccess={() => {
+        onSuccess={(offer) => {
           showToast('Help offer sent to requester! ✉️', 'success');
           loadRequests();
           if (offerTargetRequest) {
-            setSelectedRequest(offerTargetRequest);
+            setSelectedRequest({
+              ...offerTargetRequest,
+              user_offer: offer,
+              offers_count: (offerTargetRequest.offers_count ?? 0) + 1
+            });
           }
         }}
         onRequireAuth={() => {

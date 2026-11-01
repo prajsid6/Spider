@@ -28,7 +28,19 @@ export interface RequestPage {
   nextCursor: RequestPageCursor | null;
 }
 
+export interface OfferPageCursor {
+  createdAt: string;
+  id: string;
+}
+
+export interface OfferPage {
+  offers: HelpOffer[];
+  hasMore: boolean;
+  nextCursor: OfferPageCursor | null;
+}
+
 const REQUEST_PAGE_SIZE = 24;
+const OFFER_PAGE_SIZE = 24;
 
 const LEGACY_DEMO_PROFILE_IDS = new Set([
   'user-aarav-1',
@@ -351,7 +363,11 @@ export const DataService = {
     return (await this.getRequestPage()).requests;
   },
 
-  async getRequestPage(cursor?: RequestPageCursor | null, locality?: string): Promise<RequestPage> {
+  async getRequestPage(
+    cursor?: RequestPageCursor | null,
+    locality?: string,
+    helperId?: string
+  ): Promise<RequestPage> {
     if (firestore) {
       const requestConstraints = [
         ...(locality ? [where('locality', '==', locality)] : []),
@@ -375,6 +391,13 @@ export const DataService = {
             where('status', '==', 'Accepted')
           ))
         : null;
+      const userOfferSnapshot = helperId && requestIds.length
+          ? await getDocs(query(
+              collection(firestore, 'offers'),
+              where('request_id', 'in', requestIds),
+              where('helper_id', '==', helperId)
+            ))
+          : null;
       const profiles = new Map<string, PublicProfile>();
       await Promise.all(requestDocs.map(async (item) => {
         const request = item.data() as HelpRequest;
@@ -387,6 +410,9 @@ export const DataService = {
       }));
       const offers = offerSnapshot?.docs.map((item) => item.data() as HelpOffer) ?? [];
       const acceptedOffers = new Map(offers.map((offer) => [offer.request_id, offer]));
+      const userOffers = new Map(
+        userOfferSnapshot?.docs.map((item) => [String(item.data().request_id), item.data() as HelpOffer]) ?? []
+      );
       const requests = requestDocs
         .map((item) => {
           const request = item.data() as HelpRequest;
@@ -395,7 +421,8 @@ export const DataService = {
             id: item.id,
             requester: profiles.get(request.requester_id),
             offers_count: request.offers_count ?? 0,
-            accepted_offer: acceptedOffers.get(item.id)
+            accepted_offer: acceptedOffers.get(item.id),
+            user_offer: userOffers.get(item.id)
           };
         })
         .filter((request) =>
@@ -437,6 +464,7 @@ export const DataService = {
       return {
         ...req,
         offers_count: reqOffers.length,
+        user_offer: helperId ? reqOffers.find((offer) => offer.helper_id === helperId) : undefined,
         requester: requester
           ? {
               id: requester.id,
@@ -536,13 +564,29 @@ export const DataService = {
 
   // Offers
   async getOffersForRequest(requestId: string): Promise<HelpOffer[]> {
+    return (await this.getOfferPage(requestId)).offers;
+  },
+
+  async getOfferPage(requestId: string, cursor?: OfferPageCursor | null): Promise<OfferPage> {
     if (firestore) {
-      const offers = await getDocs(query(
-        collection(firestore, 'offers'),
+      const offerConstraints = [
         where('request_id', '==', requestId),
-        orderBy('created_at', 'desc')
+        orderBy('created_at', 'desc'),
+        orderBy(documentId(), 'desc'),
+        ...(cursor ? [startAfter(cursor.createdAt, cursor.id)] : []),
+        limit(OFFER_PAGE_SIZE + 1)
+      ];
+      const offerSnapshot = await getDocs(query(
+        collection(firestore, 'offers'),
+        ...offerConstraints
       ));
-      return Promise.all(offers.docs.map(async (item) => {
+      const hasMore = offerSnapshot.docs.length > OFFER_PAGE_SIZE;
+      const offerDocs = offerSnapshot.docs.slice(0, OFFER_PAGE_SIZE);
+      const lastOffer = offerDocs.at(-1);
+      const nextCursor = hasMore && lastOffer
+        ? { createdAt: String(lastOffer.data().created_at), id: lastOffer.id }
+        : null;
+      const offers = await Promise.all(offerDocs.map(async (item) => {
         const offer = item.data() as HelpOffer;
         const helper = await this.getPublicProfile(offer.helper_id);
         return {
@@ -555,14 +599,25 @@ export const DataService = {
           } : undefined
         };
       }));
+      return { offers, hasMore, nextCursor };
     }
 
     // Local
     const offers = getLocal<HelpOffer[]>('offers', []);
     const profiles = this.getLocalProfiles();
 
-    return offers
+    const sortedOffers = offers
       .filter(o => o.request_id === requestId)
+      .filter((offer) => !cursor ||
+        offer.created_at < cursor.createdAt ||
+        (offer.created_at === cursor.createdAt && offer.id < cursor.id)
+      )
+      .sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id));
+    const hasMore = sortedOffers.length > OFFER_PAGE_SIZE;
+    const pageOffers = sortedOffers.slice(0, OFFER_PAGE_SIZE);
+    const lastOffer = pageOffers.at(-1);
+    return {
+      offers: pageOffers
       .map(off => {
         const helper = profiles.find(p => p.id === off.helper_id);
         return {
@@ -581,7 +636,36 @@ export const DataService = {
             username: helper.username
           } : undefined
         };
-      });
+      }),
+      hasMore,
+      nextCursor: hasMore && lastOffer
+        ? { createdAt: lastOffer.created_at, id: lastOffer.id }
+        : null
+    };
+  },
+
+  async getOfferForRequestByHelper(requestId: string, helperId: string): Promise<HelpOffer | null> {
+    let offer: HelpOffer | null = null;
+    if (firestore) {
+      const offerSnapshot = await getDoc(doc(firestore, 'offers', `${requestId}_${helperId}`));
+      if (offerSnapshot.exists()) {
+        offer = { ...offerSnapshot.data(), id: offerSnapshot.id } as HelpOffer;
+      }
+    } else {
+      offer = getLocal<HelpOffer[]>('offers', [])
+        .find((item) => item.request_id === requestId && item.helper_id === helperId) ?? null;
+    }
+
+    if (!offer) return null;
+    const helper = await this.getPublicProfile(helperId);
+    return {
+      ...offer,
+      helper: helper || undefined,
+      helper_contact: offer.status === 'Accepted' && helper ? {
+        name: helper.name,
+        username: helper.username
+      } : undefined
+    };
   },
 
   async getRatingsForRequest(requestId: string): Promise<HelpRating[]> {
@@ -765,11 +849,6 @@ export const DataService = {
       const database = firestore;
       const requestRef = doc(database, 'requests', requestId);
       const offerRef = doc(database, 'offers', offerId);
-      const pendingOffers = await getDocs(query(
-        collection(database, 'offers'),
-        where('request_id', '==', requestId),
-        where('status', '==', 'Pending')
-      ));
       await runTransaction(database, async (transaction) => {
         const [requestSnapshot, offerSnapshot] = await Promise.all([
           transaction.get(requestRef),
@@ -781,31 +860,21 @@ export const DataService = {
         if (!offerSnapshot.exists() || offerSnapshot.data().request_id !== requestId || offerSnapshot.data().status !== 'Pending') {
           throw new Error('This offer is no longer available.');
         }
-        const competingOffers = await Promise.all(pendingOffers.docs.map((offer) => transaction.get(offer.ref)));
-        competingOffers.forEach((offer) => {
-          if (offer.exists() && offer.data().status === 'Pending') {
-            transaction.update(offer.ref, { status: offer.id === offerId ? 'Accepted' : 'Declined' });
-          }
-        });
+        transaction.update(offerRef, { status: 'Accepted' });
         transaction.update(requestRef, { status: 'Connected', accepted_offer_id: offerId });
       });
       return;
     }
 
-    // Local logic (replicates trigger)
+    // Keep only the selected offer active; the connected request closes other pending offers.
     const offers = getLocal<HelpOffer[]>('offers', []);
     const requests = getLocal<HelpRequest[]>('requests', []);
 
-    // 1. Mark accepted offer
-    offers.forEach(o => {
-      if (o.request_id === requestId) {
-        if (o.id === offerId) {
-          o.status = 'Accepted';
-        } else if (o.status === 'Pending') {
-          o.status = 'Declined';
-        }
-      }
-    });
+    const selectedOffer = offers.find((offer) => offer.id === offerId && offer.request_id === requestId);
+    if (!selectedOffer || selectedOffer.status !== 'Pending') {
+      throw new Error('This offer is no longer available.');
+    }
+    selectedOffer.status = 'Accepted';
 
     // 2. Mark request as Connected
     const req = requests.find(r => r.id === requestId);

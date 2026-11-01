@@ -3,6 +3,7 @@ import type { HelpRequest, HelpOffer, HelpRating, PublicProfile } from '../types
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { DataService } from '../services/dataService';
+import type { OfferPageCursor } from '../services/dataService';
 import { InAppCall } from './InAppCall';
 import {
   X,
@@ -39,12 +40,18 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
   const { currentUser } = useAuth();
   const { showToast } = useToast();
   const [offers, setOffers] = useState<HelpOffer[]>([]);
+  const [userOffer, setUserOffer] = useState<HelpOffer | null>(null);
+  const [offersCursor, setOffersCursor] = useState<OfferPageCursor | null>(null);
+  const [hasMoreOffers, setHasMoreOffers] = useState(false);
   const [ratings, setRatings] = useState<HelpRating[]>([]);
   const [selectedRating, setSelectedRating] = useState<number | null>(null);
   const [ratingLoading, setRatingLoading] = useState(false);
   const [justCompletedRequestId, setJustCompletedRequestId] = useState<string | null>(null);
+  const [justConnectedRequestId, setJustConnectedRequestId] = useState<string | null>(null);
+  const [acceptedOfferOverride, setAcceptedOfferOverride] = useState<HelpOffer | null>(null);
   const [requesterProfile, setRequesterProfile] = useState<PublicProfile | null>(null);
   const [loadingOffers, setLoadingOffers] = useState(false);
+  const [loadingMoreOffers, setLoadingMoreOffers] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -55,9 +62,19 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
     setLoadingOffers(true);
     setError(null);
     try {
-      const fetchedOffers = await DataService.getOffersForRequest(request.id);
-      setOffers(fetchedOffers);
-      const accepted = fetchedOffers.find(offer => offer.status === 'Accepted') || request.accepted_offer;
+      const [offerPage, submittedOffer] = await Promise.all([
+        DataService.getOfferPage(request.id),
+        currentUser
+          ? DataService.getOfferForRequestByHelper(request.id, currentUser.id)
+          : Promise.resolve(null)
+      ]);
+      setOffers(offerPage.offers);
+      setOffersCursor(offerPage.nextCursor);
+      setHasMoreOffers(offerPage.hasMore);
+      setUserOffer(submittedOffer);
+      const accepted = offerPage.offers.find(offer => offer.status === 'Accepted')
+        || request.accepted_offer
+        || (submittedOffer?.status === 'Accepted' ? submittedOffer : undefined);
       const isParticipant = currentUser?.id === request.requester_id || currentUser?.id === accepted?.helper_id;
       setRatings((request.status === 'Completed' || justCompletedRequestId === request.id) && isParticipant
         ? await DataService.getRatingsForRequest(request.id)
@@ -70,11 +87,30 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
       }
     } catch (err: any) {
       console.error(err);
-      setError('Could not load offers');
+      setError(err instanceof Error ? err.message : 'Could not load offers');
     } finally {
       setLoadingOffers(false);
     }
   }, [request, justCompletedRequestId, currentUser]);
+
+  const loadMoreOffers = async () => {
+    if (!request || !offersCursor || loadingMoreOffers) return;
+    setLoadingMoreOffers(true);
+    try {
+      const page = await DataService.getOfferPage(request.id, offersCursor);
+      setOffers((current) => {
+        const existingIds = new Set(current.map((offer) => offer.id));
+        return [...current, ...page.offers.filter((offer) => !existingIds.has(offer.id))];
+      });
+      setOffersCursor(page.nextCursor);
+      setHasMoreOffers(page.hasMore);
+    } catch (loadError) {
+      console.error('Failed to load older offers:', loadError);
+      setError(loadError instanceof Error ? loadError.message : 'Could not load more offers.');
+    } finally {
+      setLoadingMoreOffers(false);
+    }
+  };
 
   useEffect(() => {
     if (isOpen && request) {
@@ -84,10 +120,18 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
 
   if (!isOpen || !request) return null;
 
-  const acceptedOffer = offers.find((o) => o.status === 'Accepted') || request.accepted_offer;
+  const effectiveRequestStatus = justCompletedRequestId === request.id
+    ? 'Completed'
+    : justConnectedRequestId === request.id
+      ? 'Connected'
+      : request.status;
+  const acceptedOffer = acceptedOfferOverride?.request_id === request.id
+    ? acceptedOfferOverride
+    : offers.find((o) => o.status === 'Accepted') || request.accepted_offer;
   const isAcceptedHelper = currentUser?.id === acceptedOffer?.helper_id;
-  const userOffer = offers.find((o) => o.helper_id === currentUser?.id);
-  const isCompleted = request.status === 'Completed' || justCompletedRequestId === request.id;
+  const isCompleted = effectiveRequestStatus === 'Completed';
+  const isRequestOpen = effectiveRequestStatus === 'Open';
+  const totalOffersCount = Math.max(request.offers_count ?? 0, offers.length);
   const rateeId = isRequester ? acceptedOffer?.helper_id : request.requester_id;
   const rateeName = isRequester
     ? acceptedOffer?.helper?.name || 'your helper'
@@ -98,7 +142,10 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
   const handleAcceptOffer = async (offerId: string) => {
     setActionLoading(offerId);
     try {
+      const selectedOffer = offers.find((offer) => offer.id === offerId);
       await DataService.acceptOffer(request.id, offerId);
+      setJustConnectedRequestId(request.id);
+      if (selectedOffer) setAcceptedOfferOverride({ ...selectedOffer, status: 'Accepted' });
       showToast('Offer accepted! You are now connected with the helper 🎉', 'success');
       await loadOffersAndContacts();
       onUpdate();
@@ -199,7 +246,7 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            {request.is_emergency && request.status === 'Open' && (
+            {request.is_emergency && isRequestOpen && (
               <span className="flex items-center gap-1 rounded-full bg-rose-100 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-rose-700">
                 <AlertTriangle className="h-3 w-3" />
                 {request.expires_at && request.created_at
@@ -207,18 +254,18 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
                   : 'Urgent alert'}
               </span>
             )}
-            {request.status === 'Open' && (
+            {isRequestOpen && (
               <span className="badge-open">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                 Open for Offers
               </span>
             )}
-            {request.status === 'Connected' && (
+            {effectiveRequestStatus === 'Connected' && (
               <span className="badge-connected">
                 <UserCheck className="w-3.5 h-3.5" /> Connected
               </span>
             )}
-            {request.status === 'Completed' && (
+            {isCompleted && (
               <span className="badge-completed">
                 <CheckCircle2 className="w-3.5 h-3.5" /> Completed
               </span>
@@ -234,7 +281,7 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
         )}
 
         {/* CONNECTED CELEBRATION & PRIVATE CONTACT CARD */}
-        {(request.status === 'Connected' || isCompleted) && (isRequester || isAcceptedHelper) && (
+        {(effectiveRequestStatus === 'Connected' || isCompleted) && (isRequester || isAcceptedHelper) && (
           <div className="mt-5 p-5 rounded-2xl bg-gradient-to-br from-spider-lavender/70 via-purple-50 to-white border border-spider-border shadow-spider-sm">
             <div className="flex items-center gap-2 text-spider-deep font-extrabold text-sm mb-2">
               <Sparkles className="w-4 h-4 text-spider-primary" />
@@ -286,7 +333,7 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
             </div>
 
             {/* Requester Mark as Complete button */}
-            {isRequester && request.status === 'Connected' && !isCompleted && (
+            {isRequester && effectiveRequestStatus === 'Connected' && !isCompleted && (
               <div className="mt-4 pt-3 border-t border-spider-border/50 flex justify-end">
                 <button
                   onClick={handleMarkCompleted}
@@ -397,7 +444,7 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
             <div className="text-right">
               <p className="text-xs text-spider-muted">Offers Received</p>
               <p className="text-base font-extrabold text-spider-text mt-0.5">
-                {offers.length} {offers.length === 1 ? 'Helper' : 'Helpers'}
+                {totalOffersCount} {totalOffersCount === 1 ? 'Helper' : 'Helpers'}
               </p>
             </div>
           </div>
@@ -408,11 +455,11 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-base font-bold text-spider-text flex items-center gap-2">
               <MessageCircle className="w-4 h-4 text-spider-primary" />
-              Offers ({offers.length})
+              Offers ({totalOffersCount})
             </h3>
 
             {/* Offer Help button for non-requesters if open */}
-            {!isRequester && request.status === 'Open' && !userOffer && (
+            {!isRequester && isRequestOpen && !userOffer && (
               <button
                 onClick={() => onOpenOfferModal(request)}
                 title="Send an offer to help"
@@ -460,6 +507,7 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
               {offers.map((offer) => {
                 const isThisAccepted = offer.status === 'Accepted';
                 const isThisDeclined = offer.status === 'Declined';
+                const isNoLongerAvailable = offer.status === 'Pending' && !isRequestOpen;
 
                 return (
                   <div
@@ -467,7 +515,7 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
                     className={`p-4 rounded-2xl border transition-all ${
                       isThisAccepted
                         ? 'bg-purple-50/60 border-purple-300 ring-1 ring-purple-300'
-                        : isThisDeclined
+                        : isThisDeclined || isNoLongerAvailable
                         ? 'bg-gray-50/70 border-gray-200 opacity-60'
                         : 'bg-white border-spider-border/70 hover:border-spider-border'
                     }`}
@@ -512,7 +560,9 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
                             <span className="badge-declined">Declined</span>
                           )}
                           {offer.status === 'Pending' && (
-                            <span className="badge-pending">Pending</span>
+                            <span className={isNoLongerAvailable ? 'badge-declined' : 'badge-pending'}>
+                              {isNoLongerAvailable ? 'Request closed' : 'Pending'}
+                            </span>
                           )}
                         </span>
                       </div>
@@ -523,7 +573,7 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
                     </p>
 
                     {/* Requester Action Buttons on Pending Offers */}
-                    {isRequester && request.status === 'Open' && offer.status === 'Pending' && (
+                    {isRequester && isRequestOpen && offer.status === 'Pending' && (
                       <div className="mt-3 pt-3 border-t border-spider-border/50 flex items-center justify-end gap-2">
                         <button
                           onClick={() => handleDeclineOffer(offer.id)}
@@ -548,6 +598,18 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
                   </div>
                 );
               })}
+            </div>
+          )}
+          {hasMoreOffers && (
+            <div className="mt-4 text-center">
+              <button
+                type="button"
+                onClick={() => void loadMoreOffers()}
+                disabled={loadingMoreOffers}
+                className="btn-outline py-2 px-4 text-xs font-semibold disabled:opacity-50"
+              >
+                {loadingMoreOffers ? 'Loading older offers...' : `Load older offers (${Math.max(0, totalOffersCount - offers.length)} remaining)`}
+              </button>
             </div>
           )}
         </div>

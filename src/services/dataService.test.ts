@@ -156,6 +156,47 @@ describe('Spider DataService & Marketplace Logic', () => {
     expect(page.requests[0].locality).toBe('Indiranagar');
   });
 
+  it('joins only the signed-in helper offer to each request page', async () => {
+    const request = await DataService.createRequest(testProfiles[0].id, {
+      description: 'Help request for testing my offers'
+    });
+    await DataService.createOffer(testProfiles[1].id, {
+      request_id: request.id,
+      message: 'I can help with this request.'
+    });
+
+    const page = await DataService.getRequestPage(null, undefined, testProfiles[1].id);
+    const requestWithOffer = page.requests.find((item) => item.id === request.id);
+    expect(requestWithOffer?.user_offer?.helper_id).toBe(testProfiles[1].id);
+  });
+
+  it('paginates offers without loading the complete request history', async () => {
+    const request = await DataService.createRequest(testProfiles[0].id, {
+      description: 'Request with many offers for pagination'
+    });
+    for (let index = 0; index < 25; index += 1) {
+      const helper = {
+        ...testProfiles[1],
+        id: `page-helper-${index}`,
+        name: `Page Helper ${index}`,
+        username: `page_helper_${index}`
+      };
+      await DataService.saveProfile(helper);
+      await DataService.createOffer(helper.id, {
+        request_id: request.id,
+        message: `Help offer number ${index + 1}`
+      });
+    }
+
+    const firstPage = await DataService.getOfferPage(request.id);
+    const secondPage = await DataService.getOfferPage(request.id, firstPage.nextCursor);
+    expect(firstPage.offers).toHaveLength(24);
+    expect(firstPage.hasMore).toBe(true);
+    expect(secondPage.offers).toHaveLength(1);
+    expect(secondPage.hasMore).toBe(false);
+    expect(new Set([...firstPage.offers, ...secondPage.offers].map((offer) => offer.id)).size).toBe(25);
+  });
+
   it('requires a locality for in-person help requests', async () => {
     await expect(DataService.createRequest(testProfiles[0].id, {
       description: 'Need help carrying a table',
@@ -215,7 +256,7 @@ describe('Spider DataService & Marketplace Logic', () => {
     const offers = await DataService.getOffersForRequest(request.id);
     expect(updatedRequest?.status).toBe('Connected');
     expect(offers.find((offer) => offer.id === acceptedOffer.id)?.status).toBe('Accepted');
-    expect(offers.find((offer) => offer.id === competingOffer.id)?.status).toBe('Declined');
+    expect(offers.find((offer) => offer.id === competingOffer.id)?.status).toBe('Pending');
     const helperContact = offers.find((offer) => offer.id === acceptedOffer.id)?.helper_contact;
     expect(helperContact?.username).toBe(testProfiles[1].username);
     expect(helperContact).not.toHaveProperty('mobile_number');

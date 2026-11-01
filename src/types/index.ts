@@ -39,6 +39,7 @@ export interface HelpRequest {
   requester?: PublicProfile;
   offers_count?: number;
   accepted_offer?: HelpOffer;
+  user_offer?: HelpOffer;
 }
 
 export interface HelpOffer {
