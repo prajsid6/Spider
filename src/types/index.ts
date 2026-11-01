@@ -24,6 +24,7 @@ export interface PublicProfile {
 export interface HelpRequest {
   id: string;
   requester_id: string;
+  locality?: string;
   description: string;
   details?: string | null;
   budget_inr?: number | null;
@@ -68,6 +69,7 @@ export interface HelpRating {
 export interface NewRequestPayload {
   description: string;
   details?: string;
+  locality?: string;
   budget_inr?: number;
   connection_mode?: ConnectionMode;
   is_emergency?: boolean;

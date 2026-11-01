@@ -106,6 +106,7 @@ describe('Spider DataService & Marketplace Logic', () => {
     const newRequest = await DataService.createRequest(user!.id, {
       description: 'Need help assembling my standing desk',
       details: 'Have all parts ready in living room',
+      locality: 'Indiranagar',
       budget_inr: 750,
       connection_mode: 'in_person'
     });
@@ -114,8 +115,52 @@ describe('Spider DataService & Marketplace Logic', () => {
     expect(newRequest.status).toBe('Open');
     expect(newRequest.budget_inr).toBe(750);
     expect(newRequest.connection_mode).toBe('in_person');
+    expect(newRequest.locality).toBe('Indiranagar');
     expect(newRequest.requester_id).toBe(user!.id);
     expect((await DataService.getRequests()).some((request) => request.id === newRequest.id)).toBe(true);
+  });
+
+  it('paginates marketplace requests without duplicate or missing entries', async () => {
+    const requester = testProfiles[0];
+    await Promise.all(Array.from({ length: 25 }, (_, index) =>
+      DataService.createRequest(requester.id, {
+        description: `Help request number ${index + 1}`,
+        locality: index % 2 === 0 ? 'Indiranagar' : 'Koramangala'
+      })
+    ));
+
+    const firstPage = await DataService.getRequestPage();
+    const secondPage = await DataService.getRequestPage(firstPage.nextCursor);
+    const allIds = [...firstPage.requests, ...secondPage.requests].map((request) => request.id);
+
+    expect(firstPage.requests).toHaveLength(24);
+    expect(firstPage.hasMore).toBe(true);
+    expect(secondPage.requests).toHaveLength(1);
+    expect(secondPage.hasMore).toBe(false);
+    expect(new Set(allIds).size).toBe(25);
+  });
+
+  it('filters marketplace requests by Bengaluru locality', async () => {
+    const requester = testProfiles[0];
+    await DataService.createRequest(requester.id, {
+      description: 'Help request in Indiranagar',
+      locality: 'Indiranagar'
+    });
+    await DataService.createRequest(requester.id, {
+      description: 'Help request in Koramangala',
+      locality: 'Koramangala'
+    });
+
+    const page = await DataService.getRequestPage(null, 'Indiranagar');
+    expect(page.requests).toHaveLength(1);
+    expect(page.requests[0].locality).toBe('Indiranagar');
+  });
+
+  it('requires a locality for in-person help requests', async () => {
+    await expect(DataService.createRequest(testProfiles[0].id, {
+      description: 'Need help carrying a table',
+      connection_mode: 'in_person'
+    })).rejects.toThrow('Choose a locality');
   });
 
   it('creates urgent requests and hides expired alerts', async () => {
@@ -123,6 +168,7 @@ describe('Spider DataService & Marketplace Logic', () => {
     const activeAlert = await DataService.createRequest(requester.id, {
       description: 'Need urgent help with a flat tyre',
       details: 'Area / landmark: Indiranagar',
+      locality: 'Indiranagar',
       connection_mode: 'in_person',
       is_emergency: true,
       expires_at: new Date(Date.now() + 3 * 60 * 1000).toISOString()
@@ -162,6 +208,7 @@ describe('Spider DataService & Marketplace Logic', () => {
       proposed_price_inr: 900
     });
 
+    expect((await DataService.getRequestPage()).requests.find((item) => item.id === request.id)?.offers_count).toBe(2);
     await DataService.acceptOffer(request.id, acceptedOffer.id);
 
     const updatedRequest = (await DataService.getRequests()).find((item) => item.id === request.id);

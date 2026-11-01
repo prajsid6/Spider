@@ -1,18 +1,34 @@
 import { firestore } from '../lib/firebase';
 import {
   collection,
+  documentId,
   doc,
   getDoc,
   getDocs,
+  limit,
   onSnapshot,
   orderBy,
   query,
   runTransaction,
   setDoc,
+  startAfter,
   updateDoc,
   where
 } from 'firebase/firestore';
 import type { Profile, PublicProfile, HelpRequest, HelpOffer, HelpRating, NewRequestPayload, NewOfferPayload } from '../types';
+
+export interface RequestPageCursor {
+  createdAt: string;
+  id: string;
+}
+
+export interface RequestPage {
+  requests: HelpRequest[];
+  hasMore: boolean;
+  nextCursor: RequestPageCursor | null;
+}
+
+const REQUEST_PAGE_SIZE = 24;
 
 const LEGACY_DEMO_PROFILE_IDS = new Set([
   'user-aarav-1',
@@ -332,28 +348,54 @@ export const DataService = {
 
   // Requests
   async getRequests(): Promise<HelpRequest[]> {
+    return (await this.getRequestPage()).requests;
+  },
+
+  async getRequestPage(cursor?: RequestPageCursor | null, locality?: string): Promise<RequestPage> {
     if (firestore) {
-      const [requestSnapshot, offerSnapshot] = await Promise.all([
-        getDocs(query(collection(firestore, 'requests'), orderBy('created_at', 'desc'))),
-        getDocs(collection(firestore, 'offers'))
-      ]);
+      const requestConstraints = [
+        ...(locality ? [where('locality', '==', locality)] : []),
+        orderBy('created_at', 'desc'),
+        orderBy(documentId(), 'desc'),
+        ...(cursor ? [startAfter(cursor.createdAt, cursor.id)] : []),
+        limit(REQUEST_PAGE_SIZE + 1)
+      ];
+      const requestSnapshot = await getDocs(query(collection(firestore, 'requests'), ...requestConstraints));
+      const hasMore = requestSnapshot.docs.length > REQUEST_PAGE_SIZE;
+      const requestDocs = requestSnapshot.docs.slice(0, REQUEST_PAGE_SIZE);
+      const nextDoc = requestDocs.at(-1);
+      const nextCursor = hasMore && nextDoc
+        ? { createdAt: String(nextDoc.data().created_at), id: nextDoc.id }
+        : null;
+      const requestIds = requestDocs.map((item) => item.id);
+      const offerSnapshot = requestIds.length
+        ? await getDocs(query(
+            collection(firestore, 'offers'),
+            where('request_id', 'in', requestIds),
+            where('status', '==', 'Accepted')
+          ))
+        : null;
       const profiles = new Map<string, PublicProfile>();
-      const profileIds = [...new Set(requestSnapshot.docs.map((item) => item.data().requester_id as string))];
-      await Promise.all(profileIds.map(async (profileId) => {
-        const profile = await this.getPublicProfile(profileId);
-        if (profile) profiles.set(profileId, profile);
+      await Promise.all(requestDocs.map(async (item) => {
+        const request = item.data() as HelpRequest;
+        if (request.requester) {
+          profiles.set(request.requester_id, request.requester);
+          return;
+        }
+        const profile = await this.getPublicProfile(request.requester_id);
+        if (profile) profiles.set(request.requester_id, profile);
       }));
-      const offers = offerSnapshot.docs.map((item) => item.data() as HelpOffer);
-      return requestSnapshot.docs
+      const offers = offerSnapshot?.docs.map((item) => item.data() as HelpOffer) ?? [];
+      const acceptedOffers = new Map(offers.map((offer) => [offer.request_id, offer]));
+      const requests = requestDocs
         .map((item) => {
           const request = item.data() as HelpRequest;
-          const requestOffers = offers.filter((offer) => offer.request_id === item.id);
           return {
             ...request,
             id: item.id,
             requester: profiles.get(request.requester_id),
-            offers_count: requestOffers.length,
-            accepted_offer: requestOffers.find((offer) => offer.status === 'Accepted')
+            offers_count: request.offers_count ?? 0,
+            accepted_offer: acceptedOffers.get(item.id)
           };
         })
         .filter((request) =>
@@ -362,19 +404,32 @@ export const DataService = {
           !request.expires_at ||
           new Date(request.expires_at).getTime() > Date.now()
         );
+      return { requests, hasMore, nextCursor };
     }
 
     // Local / Demo Mode
-    const requests = getLocal<HelpRequest[]>('requests', []);
+    let requests = getLocal<HelpRequest[]>('requests', []);
+    if (locality) requests = requests.filter((request) => request.locality === locality);
+    requests = requests
+      .filter((request) =>
+        !request.is_emergency ||
+        request.status !== 'Open' ||
+        !request.expires_at ||
+        new Date(request.expires_at).getTime() > Date.now()
+      )
+      .filter((request) => !cursor ||
+        request.created_at < cursor.createdAt ||
+        (request.created_at === cursor.createdAt && request.id < cursor.id)
+      )
+      .sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id));
     const profiles = this.getLocalProfiles();
     const offers = getLocal<HelpOffer[]>('offers', []);
 
-    return requests.filter(req =>
-      !req.is_emergency ||
-      req.status !== 'Open' ||
-      !req.expires_at ||
-      new Date(req.expires_at).getTime() > Date.now()
-    ).map(req => {
+    const hasMore = requests.length > REQUEST_PAGE_SIZE;
+    const pageRequests = requests.slice(0, REQUEST_PAGE_SIZE);
+    const lastRequest = pageRequests.at(-1);
+    return {
+      requests: pageRequests.map(req => {
       const requester = profiles.find(p => p.id === req.requester_id);
       const reqOffers = offers.filter(o => o.request_id === req.id);
       const accepted = reqOffers.find(o => o.status === 'Accepted');
@@ -393,16 +448,29 @@ export const DataService = {
           : undefined,
         accepted_offer: accepted
       };
-    });
+      }),
+      hasMore,
+      nextCursor: hasMore && lastRequest
+        ? { createdAt: lastRequest.created_at, id: lastRequest.id }
+        : null
+    };
   },
 
   async createRequest(requesterId: string, payload: NewRequestPayload): Promise<HelpRequest> {
+    const locality = payload.locality?.trim();
+    if (locality && locality.length > 80) {
+      throw new Error('Locality must be 80 characters or fewer.');
+    }
+    if (payload.connection_mode === 'in_person' && !locality) {
+      throw new Error('Choose a locality for an in-person request.');
+    }
     if (firestore) {
       const requestRef = doc(collection(firestore, 'requests'));
       const requester = await this.getPublicProfile(requesterId);
       const newRequest: HelpRequest = {
         id: requestRef.id,
         requester_id: requesterId,
+        ...(locality ? { locality } : {}),
         description: payload.description.trim(),
         details: payload.details?.trim() || null,
         budget_inr: payload.budget_inr ? Number(payload.budget_inr) : null,
@@ -426,6 +494,7 @@ export const DataService = {
     const newReq: HelpRequest = {
       id: `req-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
       requester_id: requesterId,
+      ...(locality ? { locality } : {}),
       description: payload.description.trim(),
       details: payload.details?.trim() || null,
       budget_inr: payload.budget_inr ? Number(payload.budget_inr) : null,
@@ -641,6 +710,7 @@ export const DataService = {
           helper: helper || undefined
         };
         transaction.set(offerRef, offer);
+        transaction.update(requestRef, { offers_count: (request.offers_count ?? 0) + 1 });
         return offer;
       });
     }
@@ -649,8 +719,8 @@ export const DataService = {
     const offers = getLocal<HelpOffer[]>('offers', []);
     const profiles = this.getLocalProfiles();
     const helper = profiles.find(p => p.id === helperId);
-    const request = getLocal<HelpRequest[]>('requests', [])
-      .find(item => item.id === payload.request_id);
+    const requests = getLocal<HelpRequest[]>('requests', []);
+    const request = requests.find(item => item.id === payload.request_id);
     if (!request || request.status !== 'Open') {
       throw new Error('This request is no longer accepting offers.');
     }
@@ -685,6 +755,8 @@ export const DataService = {
 
     offers.push(newOffer);
     setLocal('offers', offers);
+    request.offers_count = (request.offers_count ?? 0) + 1;
+    setLocal('requests', requests);
     return newOffer;
   },
 
@@ -761,7 +833,7 @@ export const DataService = {
   },
 
   // Realtime updates subscription
-  subscribeToMarketplace(onUpdate: () => void): () => void {
+  subscribeToMarketplace(onUpdate: () => void, requestIds: string[] = [], locality?: string): () => void {
     if (!firestore) {
       const handleStorage = (event: StorageEvent) => {
         if (event.key === 'spider_requests' || event.key === 'spider_offers') onUpdate();
@@ -770,15 +842,33 @@ export const DataService = {
       return () => window.removeEventListener('storage', handleStorage);
     }
 
-    const unsubscribeRequests = onSnapshot(collection(firestore, 'requests'), onUpdate, (error) => {
+    const requestConstraints = [
+      ...(locality ? [where('locality', '==', locality)] : []),
+      orderBy('created_at', 'desc'),
+      orderBy(documentId(), 'desc'),
+      limit(REQUEST_PAGE_SIZE)
+    ];
+    const unsubscribeRequests = onSnapshot(query(collection(firestore, 'requests'), ...requestConstraints), onUpdate, (error) => {
       console.error('Marketplace request subscription failed:', error);
     });
-    const unsubscribeOffers = onSnapshot(collection(firestore, 'offers'), onUpdate, (error) => {
-      console.error('Marketplace offer subscription failed:', error);
-    });
+    const unsubscribeOffers: Array<() => void> = [];
+    for (let index = 0; index < requestIds.length; index += 15) {
+      const requestIdBatch = requestIds.slice(index, index + 15);
+      unsubscribeOffers.push(onSnapshot(
+        query(
+          collection(firestore, 'offers'),
+          where('request_id', 'in', requestIdBatch),
+          where('status', 'in', ['Accepted', 'Declined'])
+        ),
+        onUpdate,
+        (error) => {
+          console.error('Marketplace offer status subscription failed:', error);
+        }
+      ));
+    }
     return () => {
       unsubscribeRequests();
-      unsubscribeOffers();
+      unsubscribeOffers.forEach((unsubscribe) => unsubscribe());
     };
   },
 

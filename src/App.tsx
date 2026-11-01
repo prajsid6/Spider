@@ -2,8 +2,10 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider, useToast } from './context/ToastContext';
 import { DataService } from './services/dataService';
+import type { RequestPageCursor } from './services/dataService';
 import { buyEmergencyExtension } from './services/paymentService';
 import type { HelpRequest } from './types';
+import { BENGALURU_LOCALITIES } from './lib/bengaluruLocalities';
 import { Navbar } from './components/Navbar';
 import { HeroBanner } from './components/HeroBanner';
 import { RequestCard } from './components/RequestCard';
@@ -36,11 +38,15 @@ const SpiderApp: React.FC = () => {
   const { showToast } = useToast();
   const [requests, setRequests] = useState<HelpRequest[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMoreRequests, setLoadingMoreRequests] = useState(false);
+  const [hasMoreRequests, setHasMoreRequests] = useState(false);
+  const [requestCursor, setRequestCursor] = useState<RequestPageCursor | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Filters & State
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('All');
+  const [activeLocality, setActiveLocality] = useState('');
   const [currentTab, setCurrentTab] = useState<FilterTab>('all');
   const [sortBy, setSortBy] = useState<SortOption>('newest');
 
@@ -59,17 +65,56 @@ const SpiderApp: React.FC = () => {
   const loadRequests = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setRequests([]);
+    setHasMoreRequests(false);
+    setRequestCursor(null);
     try {
       if (demoAuthEnabled) DataService.ensureLocalDemoData();
-      const data = await DataService.getRequests();
-      setRequests(data);
+      const page = await DataService.getRequestPage(null, activeLocality || undefined);
+      setRequests(page.requests);
+      setHasMoreRequests(page.hasMore);
+      setRequestCursor(page.nextCursor);
     } catch (err: any) {
       console.error(err);
       setError('Failed to load help requests.');
     } finally {
       setLoading(false);
     }
-  }, [demoAuthEnabled]);
+  }, [activeLocality, demoAuthEnabled]);
+
+  const refreshRequests = useCallback(async () => {
+    try {
+      const page = await DataService.getRequestPage(null, activeLocality || undefined);
+      setRequests((current) => {
+        const refreshedIds = new Set(page.requests.map((request) => request.id));
+        const retained = current.filter((request) => !refreshedIds.has(request.id));
+        return [...page.requests, ...retained];
+      });
+      setHasMoreRequests(page.hasMore || Boolean(requestCursor));
+      setRequestCursor((current) => current || page.nextCursor);
+    } catch (refreshError) {
+      console.error('Failed to refresh marketplace requests:', refreshError);
+    }
+  }, [activeLocality, requestCursor]);
+
+  const loadMoreRequests = useCallback(async () => {
+    if (!requestCursor || loadingMoreRequests) return;
+    setLoadingMoreRequests(true);
+    try {
+      const page = await DataService.getRequestPage(requestCursor, activeLocality || undefined);
+      setRequests((current) => {
+        const existingIds = new Set(current.map((request) => request.id));
+        return [...current, ...page.requests.filter((request) => !existingIds.has(request.id))];
+      });
+      setHasMoreRequests(page.hasMore);
+      setRequestCursor(page.nextCursor);
+    } catch (pageError) {
+      console.error('Failed to load older marketplace requests:', pageError);
+      showToast('Could not load older requests. Please try again.', 'error');
+    } finally {
+      setLoadingMoreRequests(false);
+    }
+  }, [activeLocality, loadingMoreRequests, requestCursor, showToast]);
 
   const removeExpiredEmergencyRequests = useCallback(() => {
     const now = Date.now();
@@ -81,18 +126,24 @@ const SpiderApp: React.FC = () => {
     ));
   }, []);
 
-  useEffect(() => {
-    loadRequests();
+  const requestIdsKey = requests.slice(0, 24).map((request) => request.id).join('|');
 
-    // Subscribe to realtime database updates
-    const unsubscribe = DataService.subscribeToMarketplace(() => {
-      loadRequests();
-    });
+  useEffect(() => {
+    void loadRequests();
+  }, [loadRequests]);
+
+  useEffect(() => {
+    const requestIds = requestIdsKey ? requestIdsKey.split('|') : [];
+    const unsubscribe = DataService.subscribeToMarketplace(
+      () => { void refreshRequests(); },
+      requestIds,
+      activeLocality || undefined
+    );
 
     return () => {
       unsubscribe();
     };
-  }, [loadRequests]);
+  }, [activeLocality, refreshRequests, requestIdsKey]);
 
   useEffect(() => {
     const activeEmergencyExpiries = requests
@@ -147,6 +198,9 @@ const SpiderApp: React.FC = () => {
   const filteredRequests = useMemo(() => {
     const liveEmergencyIds = new Set(liveEmergencyRequests.map((request) => request.id));
     let result = requests.filter((request) => !liveEmergencyIds.has(request.id));
+    if (activeLocality) {
+      result = result.filter((request) => request.locality === activeLocality);
+    }
 
     // Search query filter
     if (searchQuery.trim()) {
@@ -155,6 +209,7 @@ const SpiderApp: React.FC = () => {
         (r) =>
           r.description.toLowerCase().includes(q) ||
           r.details?.toLowerCase().includes(q) ||
+          r.locality?.toLowerCase().includes(q) ||
           r.requester?.name?.toLowerCase().includes(q) ||
           r.requester?.username?.toLowerCase().includes(q)
       );
@@ -219,7 +274,7 @@ const SpiderApp: React.FC = () => {
     });
 
     return result;
-  }, [requests, liveEmergencyRequests, searchQuery, activeCategory, currentTab, sortBy, currentUser]);
+  }, [requests, liveEmergencyRequests, searchQuery, activeCategory, activeLocality, currentTab, sortBy, currentUser]);
 
   // Counts for tabs
   const openCount = requests.filter((r) => r.status === 'Open').length;
@@ -312,6 +367,18 @@ const SpiderApp: React.FC = () => {
               </span>
             </label>
             <label className="block text-[10px] font-bold uppercase tracking-wider text-spider-muted">
+              Bengaluru locality
+              <select
+                value={activeLocality}
+                onChange={(event) => setActiveLocality(event.target.value)}
+                title="Filter requests by Bengaluru locality"
+                className="mt-2 block min-w-48 rounded-xl border border-spider-border/80 bg-white px-3 py-2 text-xs font-semibold normal-case tracking-normal text-spider-text shadow-xs focus:border-spider-primary focus:outline-none focus:ring-2 focus:ring-spider-primary/20"
+              >
+                <option value="">All Bengaluru localities</option>
+                {BENGALURU_LOCALITIES.map((area) => <option key={area} value={area}>{area}</option>)}
+              </select>
+            </label>
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-spider-muted">
               Filter by status
               <select
                 value={currentTab}
@@ -319,11 +386,11 @@ const SpiderApp: React.FC = () => {
                 title="Filter requests by status"
                 className="mt-2 block min-w-48 rounded-xl border border-spider-border/80 bg-white px-3 py-2 text-xs font-semibold normal-case tracking-normal text-spider-text shadow-xs focus:border-spider-primary focus:outline-none focus:ring-2 focus:ring-spider-primary/20"
               >
-                <option value="all">Any Status ({requests.length})</option>
-                <option value="open">Open ({openCount})</option>
-                <option value="connected">Connected ({connectedCount})</option>
-                <option value="completed">Completed ({completedCount})</option>
-                {currentUser && <option value="my-requests">My Requests ({myRequestsCount})</option>}
+                <option value="all">Any Status ({requests.length} loaded)</option>
+                <option value="open">Open ({openCount} loaded)</option>
+                <option value="connected">Connected ({connectedCount} loaded)</option>
+                <option value="completed">Completed ({completedCount} loaded)</option>
+                {currentUser && <option value="my-requests">My Requests ({myRequestsCount} loaded)</option>}
               </select>
             </label>
             <label className="block text-[10px] font-bold uppercase tracking-wider text-spider-muted">
@@ -365,6 +432,9 @@ const SpiderApp: React.FC = () => {
 
         {/* Requests Feed */}
         <div className="mt-6">
+          <p className="mb-3 text-[11px] text-spider-muted">
+            Showing up to 24 requests at a time. Load older requests to continue browsing.
+          </p>
           {loading ? (
             <div className="py-20 text-center space-y-3">
               <div className="w-8 h-8 border-3 border-spider-primary border-t-transparent rounded-full animate-spin mx-auto" />
@@ -389,7 +459,7 @@ const SpiderApp: React.FC = () => {
               </div>
               <h3 className="text-base font-bold text-spider-text">No requests found</h3>
               <p className="text-xs text-spider-muted mt-1 max-w-sm mx-auto">
-                {searchQuery || activeCategory !== 'All' || currentTab !== 'all'
+                {searchQuery || activeCategory !== 'All' || currentTab !== 'all' || activeLocality
                   ? 'No help requests matched your current filters. Try searching for something else or clearing filters.'
                   : 'Be the first to post a help request in your community!'}
               </p>
@@ -400,11 +470,21 @@ const SpiderApp: React.FC = () => {
                       setSearchQuery('');
                       setActiveCategory('All');
                       setCurrentTab('all');
+                      setActiveLocality('');
                     }}
                     className="btn-outline py-2 px-4 text-xs font-semibold"
-                    title="Remove search and category filters"
+                    title="Remove search and request filters"
                   >
                     Clear Filters
+                  </button>
+                )}
+                {hasMoreRequests && (
+                  <button
+                    onClick={() => void loadMoreRequests()}
+                    disabled={loadingMoreRequests}
+                    className="btn-outline py-2 px-4 text-xs font-semibold disabled:opacity-50"
+                  >
+                    {loadingMoreRequests ? 'Loading...' : 'Load older requests'}
                   </button>
                 )}
                 <button
@@ -428,6 +508,17 @@ const SpiderApp: React.FC = () => {
                   onExtendAlert={handleExtendAlert}
                 />
               ))}
+            </div>
+          )}
+          {!loading && !error && filteredRequests.length > 0 && hasMoreRequests && (
+            <div className="mt-7 text-center">
+              <button
+                onClick={() => void loadMoreRequests()}
+                disabled={loadingMoreRequests}
+                className="btn-outline py-2.5 px-5 text-xs font-bold disabled:opacity-50"
+              >
+                {loadingMoreRequests ? 'Loading older requests...' : 'Load older requests'}
+              </button>
             </div>
           )}
         </div>

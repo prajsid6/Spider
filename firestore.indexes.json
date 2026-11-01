@@ -1,6 +1,15 @@
 {
   "indexes": [
     {
+      "collectionGroup": "requests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "locality", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" },
+        { "fieldPath": "__name__", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "offers",
       "queryScope": "COLLECTION",
       "fields": [

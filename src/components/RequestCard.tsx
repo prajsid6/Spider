@@ -140,6 +140,12 @@ export const RequestCard: React.FC<RequestCardProps> = ({
           {request.connection_mode === 'in_person' ? <MapPin className="h-3 w-3" /> : <Video className="h-3 w-3" />}
           {request.connection_mode === 'in_person' ? 'Meet in person' : 'Virtual · In-app call'}
         </p>
+        {request.locality && (
+          <p className="mt-1.5 flex items-center gap-1 text-[11px] font-semibold text-spider-muted">
+            <MapPin className="h-3 w-3 shrink-0" />
+            {request.locality}, Bengaluru
+          </p>
+        )}
 
         {/* Details preview */}
         {request.details && (

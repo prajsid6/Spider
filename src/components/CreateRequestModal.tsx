@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { DataService } from '../services/dataService';
 import type { HelpRequest } from '../types';
 import { X, IndianRupee, Sparkles, AlertCircle, MapPin, Video } from 'lucide-react';
+import { BENGALURU_LOCALITIES } from '../lib/bengaluruLocalities';
 
 interface CreateRequestModalProps {
   isOpen: boolean;
@@ -21,6 +22,7 @@ export const CreateRequestModal: React.FC<CreateRequestModalProps> = ({
   const [description, setDescription] = useState('');
   const [details, setDetails] = useState('');
   const [budgetInr, setBudgetInr] = useState<string>('');
+  const [locality, setLocality] = useState('');
   const [connectionMode, setConnectionMode] = useState<'virtual' | 'in_person'>('virtual');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,18 +49,24 @@ export const CreateRequestModal: React.FC<CreateRequestModalProps> = ({
       setError('Budget must be a positive number.');
       return;
     }
+    if (connectionMode === 'in_person' && !locality) {
+      setError('Choose a Bengaluru locality for an in-person request.');
+      return;
+    }
 
     setLoading(true);
     try {
       const created = await DataService.createRequest(currentUser.id, {
         description: trimmedDesc,
         details: details.trim() || undefined,
+        locality: locality || undefined,
         budget_inr: parsedBudget,
         connection_mode: connectionMode
       });
       setDescription('');
       setDetails('');
       setBudgetInr('');
+      setLocality('');
       setConnectionMode('virtual');
       onSuccess(created);
       onClose();
@@ -136,6 +144,24 @@ export const CreateRequestModal: React.FC<CreateRequestModalProps> = ({
               onChange={(e) => setDescription(e.target.value)}
               className="input-field text-sm resize-none"
             />
+          </div>
+
+          <div>
+            <label htmlFor="request-locality" className="mb-1.5 flex items-center gap-1.5 text-xs font-bold text-spider-text">
+              <MapPin className="h-3.5 w-3.5 text-spider-primary" />
+              Bengaluru locality {connectionMode === 'in_person' ? <span className="text-red-400">*</span> : <span className="font-normal text-spider-muted">(optional)</span>}
+            </label>
+            <select
+              id="request-locality"
+              required={connectionMode === 'in_person'}
+              value={locality}
+              onChange={(event) => setLocality(event.target.value)}
+              className="input-field text-sm"
+            >
+              <option value="">Select a locality</option>
+              {BENGALURU_LOCALITIES.map((area) => <option key={area} value={area}>{area}</option>)}
+            </select>
+            <p className="mt-1 text-[11px] text-spider-muted">Share only your general area. Don’t include a home address here.</p>
           </div>
 
           <div>

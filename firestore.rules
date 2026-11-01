@@ -89,28 +89,56 @@ service cloud.firestore {
         && request.resource.data.description.size() <= 1000
         && request.resource.data.is_emergency is bool
         && request.resource.data.connection_mode in ['virtual', 'in_person']
+        && (
+          !('locality' in request.resource.data)
+          || (
+            request.resource.data.locality is string
+            && request.resource.data.locality.size() >= 2
+            && request.resource.data.locality.size() <= 80
+          )
+        )
+        && (
+          request.resource.data.connection_mode != 'in_person'
+          || request.resource.data.locality is string
+        )
+        && request.resource.data.offers_count == 0
         && request.resource.data.status == 'Open'
         && request.resource.data.keys().hasOnly([
-          'id', 'requester_id', 'description', 'details', 'budget_inr', 'connection_mode',
+          'id', 'requester_id', 'locality', 'description', 'details', 'budget_inr', 'connection_mode',
           'status', 'created_at', 'is_emergency', 'expires_at',
           'offers_count', 'requester', 'accepted_offer'
         ]);
       allow update: if signedIn()
-        && resource.data.requester_id == request.auth.uid
         && request.resource.data.requester_id == resource.data.requester_id
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'accepted_offer_id'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'accepted_offer_id', 'offers_count'])
         && (
           (
             resource.data.status == 'Open'
-            && request.resource.data.status == 'Connected'
-            && request.resource.data.accepted_offer_id is string
-            && getAfter(/databases/$(database)/documents/offers/$(request.resource.data.accepted_offer_id)).data.status == 'Accepted'
-            && getAfter(/databases/$(database)/documents/offers/$(request.resource.data.accepted_offer_id)).data.request_id == requestId
+            && request.resource.data.status == 'Open'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['offers_count'])
+            && request.resource.data.offers_count == resource.data.get('offers_count', 0) + 1
+            && resource.data.requester_id != request.auth.uid
+            && existsAfter(/databases/$(database)/documents/offers/$(requestId + '_' + request.auth.uid))
+            && getAfter(/databases/$(database)/documents/offers/$(requestId + '_' + request.auth.uid)).data.request_id == requestId
+            && getAfter(/databases/$(database)/documents/offers/$(requestId + '_' + request.auth.uid)).data.status == 'Pending'
           )
-          || (
-            resource.data.status == 'Connected'
-            && request.resource.data.status == 'Completed'
-            && request.resource.data.accepted_offer_id == resource.data.accepted_offer_id
+          ||
+          (
+            resource.data.requester_id == request.auth.uid
+            && (
+              (
+                resource.data.status == 'Open'
+                && request.resource.data.status == 'Connected'
+                && request.resource.data.accepted_offer_id is string
+                && getAfter(/databases/$(database)/documents/offers/$(request.resource.data.accepted_offer_id)).data.status == 'Accepted'
+                && getAfter(/databases/$(database)/documents/offers/$(request.resource.data.accepted_offer_id)).data.request_id == requestId
+              )
+              || (
+                resource.data.status == 'Connected'
+                && request.resource.data.status == 'Completed'
+                && request.resource.data.accepted_offer_id == resource.data.accepted_offer_id
+              )
+            )
           )
         );
       allow delete: if false;
@@ -120,6 +148,8 @@ service cloud.firestore {
       allow read: if true;
       allow create: if signedIn()
         && request.resource.data.helper_id == request.auth.uid
+        && offerId == request.resource.data.request_id + '_' + request.auth.uid
+        && request.resource.data.id == offerId
         && request.resource.data.message is string
         && request.resource.data.message.size() >= 3
         && request.resource.data.message.size() <= 2000
@@ -130,6 +160,8 @@ service cloud.firestore {
         ])
         && exists(/databases/$(database)/documents/requests/$(request.resource.data.request_id))
         && get(/databases/$(database)/documents/requests/$(request.resource.data.request_id)).data.status == 'Open'
+        && getAfter(/databases/$(database)/documents/requests/$(request.resource.data.request_id)).data.offers_count
+          == get(/databases/$(database)/documents/requests/$(request.resource.data.request_id)).data.get('offers_count', 0) + 1
         && get(/databases/$(database)/documents/requests/$(request.resource.data.request_id)).data.requester_id != request.auth.uid;
       allow update: if signedIn()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])

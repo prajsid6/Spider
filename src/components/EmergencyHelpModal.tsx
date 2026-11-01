@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AlertTriangle, LocateFixed, MapPin, Timer, X } from 'lucide-react';
+import { AlertTriangle, MapPin, Timer, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { DataService } from '../services/dataService';
 import type { HelpRequest } from '../types';
@@ -22,7 +22,6 @@ export const EmergencyHelpModal: React.FC<EmergencyHelpModalProps> = ({
   const [area, setArea] = useState('');
   const [durationMinutes, setDurationMinutes] = useState(20);
   const [loading, setLoading] = useState(false);
-  const [locating, setLocating] = useState(false);
   const [error, setError] = useState('');
 
   if (!isOpen) return null;
@@ -52,6 +51,7 @@ export const EmergencyHelpModal: React.FC<EmergencyHelpModalProps> = ({
       const request = await DataService.createRequest(currentUser.id, {
         description: task,
         details: `Area / landmark: ${location}`,
+        locality: location,
         connection_mode: 'in_person',
         is_emergency: true,
         expires_at: new Date(Date.now() + durationMinutes * 60 * 1000).toISOString()
@@ -65,32 +65,6 @@ export const EmergencyHelpModal: React.FC<EmergencyHelpModalProps> = ({
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleUseCurrentLocation = () => {
-    setError('');
-    if (!navigator.geolocation) {
-      setError('Current location is not supported by this browser. Enter your area or a nearby landmark instead.');
-      return;
-    }
-
-    setLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      ({ coords }) => {
-        setArea(`Current location (approx.): ${coords.latitude.toFixed(3)}, ${coords.longitude.toFixed(3)}`);
-        setLocating(false);
-      },
-      (locationError) => {
-        const message = locationError.code === locationError.PERMISSION_DENIED
-          ? 'Location permission was denied. Allow location access in your browser or enter your area manually.'
-          : locationError.code === locationError.TIMEOUT
-            ? 'Could not get your location in time. Please try again or enter your area manually.'
-            : 'Could not determine your location. Please try again or enter your area manually.';
-        setError(message);
-        setLocating(false);
-      },
-      { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 }
-    );
   };
 
   return (
@@ -147,27 +121,18 @@ export const EmergencyHelpModal: React.FC<EmergencyHelpModalProps> = ({
           <div>
             <label htmlFor="emergency-area" className="mb-1.5 flex items-center gap-1.5 text-xs font-bold text-spider-text">
               <MapPin className="h-3.5 w-3.5 text-rose-600" />
-              Your area or nearby landmark
+              Your Bengaluru locality or nearby landmark
             </label>
             <input
               id="emergency-area"
               required
-              maxLength={160}
+              maxLength={80}
               value={area}
               onChange={(event) => setArea(event.target.value)}
-              placeholder="For example: Indiranagar, near 100 Feet Road"
+              placeholder="For example: Indiranagar"
               className="input-field text-sm"
             />
-            <button
-              type="button"
-              onClick={handleUseCurrentLocation}
-              disabled={locating}
-              className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-spider-border px-3 py-2 text-xs font-bold text-spider-text transition-colors hover:border-rose-300 hover:text-rose-700 disabled:cursor-wait disabled:opacity-60"
-            >
-              <LocateFixed className="h-3.5 w-3.5" />
-              {locating ? 'Getting location...' : 'Use current location'}
-            </button>
-            <p className="mt-1 text-[11px] text-spider-muted">Your current location is rounded to approximately 100 metres and included in the alert. You can edit it or enter an area manually.</p>
+            <p className="mt-1 text-[11px] text-spider-muted">This area is visible with your public request. Share a neighborhood only, not your address or live location.</p>
           </div>
 
           <fieldset>

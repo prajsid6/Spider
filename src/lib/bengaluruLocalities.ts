@@ -1,0 +1,22 @@
+export const BENGALURU_LOCALITIES = [
+  'Indiranagar',
+  'Koramangala',
+  'HSR Layout',
+  'Whitefield',
+  'Jayanagar',
+  'JP Nagar',
+  'Electronic City',
+  'Marathahalli',
+  'Bellandur',
+  'Sarjapur Road',
+  'BTM Layout',
+  'Malleshwaram',
+  'Rajajinagar',
+  'Yelahanka',
+  'Hebbal',
+  'Banashankari',
+  'Basavanagudi',
+  'Vijayanagar',
+  'Domlur',
+  'Other Bengaluru locality'
+] as const;
