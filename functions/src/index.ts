@@ -1,4 +1,4 @@
-import { createHmac, createHash, timingSafeEqual } from 'node:crypto';
+import { createHmac, createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { getApps, initializeApp } from 'firebase-admin/app';
 import { getDatabase } from 'firebase-admin/database';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
@@ -19,6 +19,111 @@ const vapidPublicKey = defineString('VAPID_PUBLIC_KEY');
 const vapidSubject = defineString('VAPID_SUBJECT', { default: 'mailto:admin@example.com' });
 const turnUrls = defineString('TURN_URLS', { default: '' });
 const firebaseDatabaseURL = defineString('FIREBASE_DATABASE_URL', { default: '' });
+const MARKETPLACE_POST_FEE_PAISE = 200;
+const URGENT_ALERT_FEE_PAISE: Record<number, number> = {
+  10: 1000,
+  20: 2000,
+  30: 3000
+};
+const SOS_CONTRIBUTION_PAISE = new Set([1000, 2500, 5000]);
+const EMERGENCY_EXTENSION_PAISE = 500;
+
+interface MarketplacePostDraft {
+  description: string;
+  details: string | null;
+  locality?: string;
+  budget_inr: number | null;
+  connection_mode: 'virtual' | 'in_person';
+  is_emergency: boolean;
+  duration_minutes: number | null;
+}
+
+const getMarketplacePostDraft = (value: unknown, durationMinutes: unknown): MarketplacePostDraft => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new HttpsError('invalid-argument', 'A help request is required.');
+  }
+  const input = value as Record<string, unknown>;
+  const description = typeof input.description === 'string' ? input.description.trim() : '';
+  const details = typeof input.details === 'string' ? input.details.trim() : '';
+  const locality = typeof input.locality === 'string' ? input.locality.trim() : '';
+  const connectionMode = input.connection_mode;
+  const isEmergency = input.is_emergency === true;
+  const budget = input.budget_inr;
+  if (
+    description.length < 5 || description.length > 1000 ||
+    details.length > 5000 ||
+    (locality && locality.length > 80) ||
+    !['virtual', 'in_person'].includes(String(connectionMode)) ||
+    (connectionMode === 'in_person' && !locality) ||
+    (budget !== undefined && budget !== null && (
+      typeof budget !== 'number' || !Number.isFinite(budget) || budget < 0
+    ))
+  ) throw new HttpsError('invalid-argument', 'The help request details are invalid.');
+
+  if (isEmergency && (
+    !Number.isInteger(durationMinutes) ||
+    !Object.hasOwn(URGENT_ALERT_FEE_PAISE, Number(durationMinutes))
+  )) throw new HttpsError('invalid-argument', 'Choose an urgent alert duration of 10, 20, or 30 minutes.');
+  if (!isEmergency && durationMinutes !== null && durationMinutes !== undefined) {
+    throw new HttpsError('invalid-argument', 'Regular requests cannot include an urgent alert duration.');
+  }
+
+  return {
+    description,
+    details: details || null,
+    ...(locality ? { locality } : {}),
+    budget_inr: typeof budget === 'number' ? budget : null,
+    connection_mode: connectionMode as 'virtual' | 'in_person',
+    is_emergency: isEmergency,
+    duration_minutes: isEmergency ? Number(durationMinutes) : null
+  };
+};
+
+const getMarketplacePostAmount = (draft: MarketplacePostDraft): number =>
+  MARKETPLACE_POST_FEE_PAISE +
+  (draft.is_emergency ? URGENT_ALERT_FEE_PAISE[draft.duration_minutes as number] : 0);
+
+const verifyCapturedRazorpayPayment = async (
+  orderId: string,
+  paymentId: string,
+  signature: string
+): Promise<{ amount: number; currency: string }> => {
+  const expected = createHmac('sha256', razorpayKeySecret.value())
+    .update(`${orderId}|${paymentId}`)
+    .digest('hex');
+  const actualBytes = Buffer.from(signature, 'hex');
+  const expectedBytes = Buffer.from(expected, 'hex');
+  if (actualBytes.length !== expectedBytes.length || !timingSafeEqual(actualBytes, expectedBytes)) {
+    throw new HttpsError('permission-denied', 'Payment signature is invalid.');
+  }
+  const response = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}`, {
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${razorpayKeyId.value()}:${razorpayKeySecret.value()}`).toString('base64')}`
+    }
+  });
+  if (!response.ok) throw new HttpsError('internal', 'Could not confirm payment status with Razorpay.');
+  const payment = await response.json() as {
+    order_id: string; amount: number; currency: string; status: string; captured: boolean;
+  };
+  if (
+    payment.order_id !== orderId ||
+    payment.currency !== 'INR' ||
+    payment.status !== 'captured' ||
+    payment.captured !== true
+  ) throw new HttpsError('failed-precondition', 'Payment has not been captured for this order.');
+  return { amount: payment.amount, currency: payment.currency };
+};
+
+const createRazorpayOrder = async (amount: number, receipt: string): Promise<{ id: string; amount: number; currency: string }> => {
+  const basic = Buffer.from(`${razorpayKeyId.value()}:${razorpayKeySecret.value()}`).toString('base64');
+  const response = await fetch('https://api.razorpay.com/v1/orders', {
+    method: 'POST',
+    headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ amount, currency: 'INR', receipt })
+  });
+  if (!response.ok) throw new HttpsError('internal', 'Could not create the payment order.');
+  return await response.json() as { id: string; amount: number; currency: string };
+};
 
 const requireAuth = (uid: string | undefined): string => {
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in is required.');
@@ -209,6 +314,191 @@ export const safetyAlert = onCall({ secrets: [vapidPrivateKey] }, async (request
   }
 
   throw new HttpsError('invalid-argument', 'Unknown safety alert operation.');
+});
+
+export const createMarketplacePostOrder = onCall({
+  secrets: [razorpayKeyId, razorpayKeySecret]
+}, async (request) => {
+  const uid = requireAuth(request.auth?.uid);
+  const draft = getMarketplacePostDraft(request.data?.draft, request.data?.durationMinutes);
+  const amount = getMarketplacePostAmount(draft);
+  const requestId = db.collection('requests').doc().id;
+  const order = await createRazorpayOrder(amount, `post_${randomUUID().replace(/-/g, '').slice(0, 32)}`);
+  if (order.amount !== amount || order.currency !== 'INR') {
+    throw new HttpsError('internal', 'Razorpay returned an unexpected order amount.');
+  }
+  await db.collection('payments').doc(order.id).set({
+    order_id: order.id,
+    request_id: requestId,
+    user_id: uid,
+    type: 'marketplace_post',
+    draft,
+    amount,
+    currency: 'INR',
+    status: 'created',
+    created_at: FieldValue.serverTimestamp()
+  });
+  return { id: order.id, amount, currency: 'INR', requestId };
+});
+
+export const verifyMarketplacePostPayment = onCall({
+  secrets: [razorpayKeyId, razorpayKeySecret]
+}, async (request) => {
+  const uid = requireAuth(request.auth?.uid);
+  const { orderId, paymentId, signature } = request.data as Record<string, unknown>;
+  if (![orderId, paymentId, signature].every((value) => typeof value === 'string')) {
+    throw new HttpsError('invalid-argument', 'Payment verification fields are required.');
+  }
+  const paymentRef = db.collection('payments').doc(orderId as string);
+  const paymentSnapshot = await paymentRef.get();
+  const paymentData = paymentSnapshot.data();
+  if (!paymentSnapshot.exists || !paymentData || paymentData.type !== 'marketplace_post') {
+    throw new HttpsError('not-found', 'Marketplace payment order was not found.');
+  }
+  if (paymentData.user_id !== uid || paymentData.order_id !== orderId) {
+    throw new HttpsError('permission-denied', 'Payment order does not belong to this account.');
+  }
+  const draft = getMarketplacePostDraft(paymentData.draft, paymentData.draft?.duration_minutes);
+  const expectedAmount = getMarketplacePostAmount(draft);
+  if (paymentData.amount !== expectedAmount || paymentData.currency !== 'INR') {
+    throw new HttpsError('failed-precondition', 'Payment order has an invalid amount.');
+  }
+  const capturedPayment = await verifyCapturedRazorpayPayment(
+    orderId as string,
+    paymentId as string,
+    signature as string
+  );
+  if (capturedPayment.amount !== expectedAmount) {
+    throw new HttpsError('failed-precondition', 'Payment is not captured for the expected amount.');
+  }
+
+  const requestId = paymentData.request_id;
+  if (typeof requestId !== 'string') throw new HttpsError('failed-precondition', 'Payment order has no request ID.');
+  const requestRef = db.collection('requests').doc(requestId);
+  const profileSnapshot = await db.collection('publicProfiles').doc(uid).get();
+  if (!profileSnapshot.exists) throw new HttpsError('failed-precondition', 'Your profile is missing.');
+  const now = Date.now();
+  const newRequest = {
+    id: requestId,
+    requester_id: uid,
+    ...(draft.locality ? { locality: draft.locality } : {}),
+    description: draft.description,
+    details: draft.details,
+    budget_inr: draft.budget_inr,
+    connection_mode: draft.connection_mode,
+    status: 'Open',
+    created_at: new Date(now).toISOString(),
+    is_emergency: draft.is_emergency,
+    expires_at: draft.is_emergency
+      ? new Date(now + (draft.duration_minutes as number) * 60 * 1000).toISOString()
+      : null,
+    offers_count: 0,
+    requester: profileSnapshot.data()
+  };
+
+  const savedRequest = await db.runTransaction(async (transaction) => {
+    const storedPaymentSnapshot = await transaction.get(paymentRef);
+    const storedPayment = storedPaymentSnapshot.data();
+    if (!storedPayment || storedPayment.user_id !== uid || storedPayment.type !== 'marketplace_post') {
+      throw new HttpsError('permission-denied', 'Marketplace payment order is invalid.');
+    }
+    if (storedPayment.status === 'paid') {
+      const existingRequest = await transaction.get(requestRef);
+      if (!existingRequest.exists) throw new HttpsError('not-found', 'The paid request could not be found.');
+      return existingRequest.data();
+    }
+    if (storedPayment.status !== 'created') {
+      throw new HttpsError('already-exists', 'This payment order has already been used.');
+    }
+    transaction.create(requestRef, newRequest);
+    transaction.update(paymentRef, {
+      status: 'paid',
+      payment_id: paymentId,
+      paid_at: FieldValue.serverTimestamp()
+    });
+    return newRequest;
+  });
+  return { verified: true, request: savedRequest };
+});
+
+export const createSosContributionOrder = onCall({
+  secrets: [razorpayKeyId, razorpayKeySecret]
+}, async (request) => {
+  const uid = requireAuth(request.auth?.uid);
+  const { requestId, amount } = request.data as Record<string, unknown>;
+  if (
+    typeof requestId !== 'string' ||
+    typeof amount !== 'number' ||
+    !SOS_CONTRIBUTION_PAISE.has(amount * 100)
+  ) throw new HttpsError('invalid-argument', 'Choose a contribution of ₹10, ₹25, or ₹50.');
+  const sosRequest = await db.collection('requests').doc(requestId).get();
+  if (!sosRequest.exists || sosRequest.data()?.requester_id !== uid || sosRequest.data()?.is_emergency !== true) {
+    throw new HttpsError('permission-denied', 'Only the person who sent this SOS can contribute.');
+  }
+  const paymentOrderAmount = amount * 100;
+  const order = await createRazorpayOrder(
+    paymentOrderAmount,
+    `sos_${randomUUID().replace(/-/g, '').slice(0, 32)}`
+  );
+  if (order.amount !== paymentOrderAmount || order.currency !== 'INR') {
+    throw new HttpsError('internal', 'Razorpay returned an unexpected order amount.');
+  }
+  await db.collection('payments').doc(order.id).set({
+    order_id: order.id,
+    request_id: requestId,
+    user_id: uid,
+    type: 'sos_contribution',
+    amount: paymentOrderAmount,
+    currency: 'INR',
+    status: 'created',
+    created_at: FieldValue.serverTimestamp()
+  });
+  return { id: order.id, amount: paymentOrderAmount, currency: 'INR' };
+});
+
+export const verifySosContributionPayment = onCall({
+  secrets: [razorpayKeyId, razorpayKeySecret]
+}, async (request) => {
+  const uid = requireAuth(request.auth?.uid);
+  const { orderId, paymentId, signature } = request.data as Record<string, unknown>;
+  if (![orderId, paymentId, signature].every((value) => typeof value === 'string')) {
+    throw new HttpsError('invalid-argument', 'Payment verification fields are required.');
+  }
+  const paymentRef = db.collection('payments').doc(orderId as string);
+  const paymentSnapshot = await paymentRef.get();
+  const payment = paymentSnapshot.data();
+  if (!paymentSnapshot.exists || !payment || payment.type !== 'sos_contribution') {
+    throw new HttpsError('not-found', 'SOS contribution order was not found.');
+  }
+  if (payment.user_id !== uid || payment.order_id !== orderId) {
+    throw new HttpsError('permission-denied', 'Contribution order does not belong to this account.');
+  }
+  if (typeof payment.amount !== 'number' || !SOS_CONTRIBUTION_PAISE.has(payment.amount)) {
+    throw new HttpsError('failed-precondition', 'Contribution order has an invalid amount.');
+  }
+  const capturedPayment = await verifyCapturedRazorpayPayment(
+    orderId as string,
+    paymentId as string,
+    signature as string
+  );
+  if (capturedPayment.amount !== payment.amount) {
+    throw new HttpsError('failed-precondition', 'Contribution payment amount does not match the order.');
+  }
+  await db.runTransaction(async (transaction) => {
+    const storedPayment = await transaction.get(paymentRef);
+    const data = storedPayment.data();
+    if (!data || data.user_id !== uid || data.type !== 'sos_contribution') {
+      throw new HttpsError('permission-denied', 'Contribution order is invalid.');
+    }
+    if (data.status === 'paid' && data.payment_id === paymentId) return;
+    if (data.status !== 'created') throw new HttpsError('already-exists', 'This contribution order has already been used.');
+    transaction.update(paymentRef, {
+      status: 'paid',
+      payment_id: paymentId,
+      paid_at: FieldValue.serverTimestamp()
+    });
+  });
+  return { verified: true };
 });
 
 export const createEmergencyExtensionOrder = onCall({
